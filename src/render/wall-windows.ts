@@ -103,9 +103,10 @@ const PLANT_SALT = 0x2781b0c5
 /**
  * A flower box, m: from `tall` under its window's pane to `lip` over its foot, and `out` from the wall, as wide as the
  * sill it stands for; its clumps of leaves, two or three, about `clump` m along each, rising `rise` m over the pane's
- * foot.
+ * foot. Only on the lowest `storeys`, where they are seen from the Kerbside: up a tower they would cost its Zone a third more
+ * triangles than its ceiling allows (high-density, 2.79 M of 2.3 M) for boxes hardly seen.
  */
-const FLOWER_BOX = { tall: 0.2, lip: 0.03, out: 0.3, clump: 0.6, rise: 0.18 }
+const FLOWER_BOX = { tall: 0.2, lip: 0.03, out: 0.3, clump: 0.6, rise: 0.18, storeys: 2 }
 /**
  * A pot plant of size 1 (#157), the kit's (`pot`) and a pot of leaves at a wall's foot (#278): its pot `pot` across and
  * `potTall` tall, under leaves `leaves` across and `leavesTall` tall whose middle is `lift` up.
@@ -273,7 +274,7 @@ export function wallWindows(min: THREE.Vector3, max: THREE.Vector3, cladding: Cl
               const sill = box('sill', along, wide, foot - SILL.tall, foot)
               boxes.push(sill)
               const draws = drawsAt(i, s, b * spec.panes.length + k)
-              if (draws() < PLANTED.boxes) planted = flowerBox(sill, along, wide, foot, draws)
+              if (draws() < PLANTED.boxes && s < FLOWER_BOX.storeys) planted = flowerBox(sill, along, wide, foot, draws)
             }
             for (const t of spec.shutters ?? []) boxes.push(measured('shutter', t, mid, s))
             windows.push({ boxes, planted })
