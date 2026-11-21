@@ -7,17 +7,35 @@ import { KERB } from './blocks'
 import { lampBoxes, PART as CAR, type ParkedModel } from './cars'
 import type { Glow } from './day'
 import { LOW_POLY } from './look'
-import type { Beacon, BeaconColour, Flag, FlagKind, Mover, MoverKind, Plume, PlumeKind, Pool, Sway, SwayKind } from './movers'
+import {
+  moverWidth,
+  type Beacon,
+  type BeaconColour,
+  type Flag,
+  type FlagKind,
+  type Mover,
+  type MoverKind,
+  type Plume,
+  type PlumeKind,
+  type Pool,
+  type Sway,
+  type SwayKind,
+} from './movers'
 import { clad, createPatterns, curtainGlass, pave, PATTERN, tile, wrap, type Cladding, type Pattern } from './pattern'
 import { canvasTexture, gable, hip, nudge, roughBall, roundedBox, tint, tone } from './shapes'
 import {
+  boxesMeet,
   type Clear,
   type CurtainPane,
   curtainPane,
   drawsWindows,
   isCurtain,
+  type Planting,
+  POT_PLANT,
+  type Solid,
   type WallOut,
   type WindowPart,
+  type Windows,
   wallWindows,
   windowed,
   wrapWindows,
@@ -171,6 +189,8 @@ export const [DECK, PLANT] = ['#dfe3e7', '#cfd5dc'] // a flat roof's deck, and t
 export const FLAG = { pole: '#e9eef2', finial: '#f0c75e' }
 // How brightly a parked taxi's roof lamp glows at night (#177).
 const TAXI_LAMP = 1.2
+/** Flowers in bloom, as low- and medium-density lay them in borders and window boxes (#179), a park's beds (#180) and the low-poly look's flower boxes (#278). */
+export const BLOOMS = ['#ffadc8', '#f6d36a', '#fff7e8', '#c7b8f0']
 export const LEAVES = {
   round: ['#7bcd5d', '#5fbc51', '#92d76e', '#6bc357', '#85cf61'],
   sakura: ['#ffbbd1', '#ffa1c1', '#ffd1df', '#ffadc8'],
@@ -201,6 +221,15 @@ const CONE8 = new THREE.ConeGeometry(1, 1, 8).translate(0, 0.5, 0) // a parasol 
 const PYRAMID = new THREE.ConeGeometry(1, 1, 4).translate(0, 0.5, 0) // turned an eighth, its base is a square 1.41 across
 const PLANE = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
 const POT = new THREE.CylinderGeometry(1, 0.75, 1, 8).translate(0, 0.5, 0) // a pot plant's pot (#157)
+/**
+ * The shapes of a flower box or a pot (`./wall-windows`' `Solid`, #278), each filling a box 1 m on a side, its foot at 0
+ * for a pot: a plain box, the pot plants' pot and a balcony plant's leaves.
+ */
+const PLANT_SHAPES: Record<Solid['shape'], THREE.BufferGeometry> = {
+  box: new THREE.BoxGeometry(1, 1, 1).toNonIndexed(),
+  pot: POT.clone().scale(0.5, 1, 0.5).toNonIndexed(),
+  ball: BUSH.clone().scale(0.5, 0.5, 0.5),
+}
 // A flat disc facing -z, the way the kit's frames face at no turn: a fan's grille or one side of a wheel (#156).
 const FACING_DISC = new THREE.CircleGeometry(1, 8).rotateY(Math.PI)
 const DISC = new THREE.CylinderGeometry(1, 1, 1, 32) // centred on its middle, unlike CYLINDER: a helipad's pad
@@ -368,6 +397,13 @@ export const KEPT_CLEAR: readonly Claim['kind'][] = ['bay', 'taxi', 'door', 'dri
 type Ground = Pick<Claim, 'x' | 'y' | 'w' | 'd' | 'ry'>
 
 /**
+ * Whether ground `mine`, grown `grow` m each side, keeps clear of claim `c`, grown `room` m: apart from a bay or a door
+ * step, or within a sliver of it; apart from what stands and from the Drive, both grown. As `kit.unclaimed` asks it.
+ */
+const clearOf = (mine: Ground, grow: number, c: Claim, room: number) =>
+  c.kind === 'stand' || c.kind === 'drive' ? reach(mine, grow, c, room, false) <= 0 : reach(mine, 0, c, 0, true) <= 0.02
+
+/**
  * How far ground `a` grown `ga` m each side reaches into claim `c` grown `gc` m each side (shrunk, if below 0): along each
  * of the two boxes' sides (the separating axes), how far either would move to clear the other, and the least of those;
  * 0 or less where they are apart. Unlike their overlap, it holds for a point within a box. The sides are taken as
@@ -461,12 +497,26 @@ const BLOCK_ZOOM = { from: 2.2, to: 3.2 }
 const TONE = { by: 0.02, chroma: 0.985 }
 /**
  * Low poly (`./look`, #277): how much darker than its wall a shutter or a door is, as the pattern shaded them (86 of 128,
- * near enough); how far a window's box may reach into another part of its building, in m, before it is left out; how
- * far round a wall to look for those parts; and how thin, two ways, a part is that covers no window, as a rail, a post,
- * a ladder's stile or a pipe does not; and how much further out than a post or a fin a curtain wall's box may stand
- * and still run behind it (#279).
+ * near enough); how far round a wall to look for the other parts of its building a window's box may not reach into
+ * (`boxesMeet`); and how thin, two ways, a part is that covers no window, as a rail, a post, a ladder's stile or a pipe
+ * does not; and how much further out than a post or a fin a curtain wall's box may stand and still run behind it (#279).
  */
-const WALL_WINDOWS = { shade: 0.66, touch: 0.005, near: 0.5, bar: 0.15, proud: 0.02 }
+const WALL_WINDOWS = { shade: 0.66, near: 0.5, bar: 0.15, proud: 0.02 }
+/**
+ * Flower boxes and pots (#278): m a pot keeps in from the kerb, clear of the Walkers' line 1.6 m in (`./walkers`) by half
+ * a Walker and some room; m a pot's foot may sink into what it stands on, or stand over it; m over the foot of its wall
+ * under which a flower box hangs where one could walk into it; m a wall's foot may stand from its building's and be a
+ * ground floor; and m round a wall to look for what stands in the way.
+ */
+const PLANTING = { walk: 2.1, sink: 0.06, low: 2.1, ground: 0.05, near: 1.5 }
+/** Whether the box `o` and the box `lo` to `hi` overlap by more than a touch every way. */
+const meets = (o: THREE.Box3, lo: THREE.Vector3, hi: THREE.Vector3) => boxesMeet(o.min, o.max, lo, hi)
+/** m from `(x, y)` to the segment from `a` to `b`. */
+function toSegment(x: number, y: number, a: { x: number; y: number }, b: { x: number; y: number }) {
+  const [dx, dy] = [b.x - a.x, b.y - a.y]
+  const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)))
+  return Math.hypot(x - a.x - t * dx, y - a.y - t * dy)
+}
 
 /**
  * The materials of the static scenery, shared by every Block so that all of them merge into one mesh per material.
@@ -659,11 +709,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   const unclaimed = (x: number, y: number, w: number, d: number, ry = 0, room = 0, of: readonly Claim['kind'][] = CLAIMS) => {
     const mine = { x, y, w, d, ry }
     const grow = w || d ? room : 0 // a point stays one, `room` m from each claim
-    // Apart from a bay or a door step, or within a sliver of it; apart from what stands and from the Drive, both grown `room`.
-    const grown = (c: Claim) => c.kind === 'stand' || c.kind === 'drive'
-    return claims.every(
-      (c) => !of.includes(c.kind) || (grown(c) ? reach(mine, grow, c, room, false) <= 0 : reach(mine, 0, c, 0, true) <= 0.02),
-    )
+    return claims.every((c) => !of.includes(c.kind) || clearOf(mine, grow, c, room))
   }
   /** The ground standing pieces claimed on the Block so far, of those standing at Stage `stage`: `kit.claimed`. */
   const claimed = (stage = 3): readonly Claim[] => claims.filter((c) => c.kind === 'stand' && (c.from ?? 1) <= stage)
@@ -754,14 +800,14 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
    * own frame, how that frame stands, its part, its look, and whether it is a Block-zoom prop.
    */
   const held: {
-    windows: (clear: Clear) => Map<WindowPart, number[]>
+    windows: (clear: Clear) => Windows
     placed: THREE.Matrix4
     wall: number
     look: Look
     blockZoom: boolean
   }[] = []
   /** Hold the windows of the wall about to be added, `placed` in the map, painted `look`, for `brick` to build (`held`). */
-  const holdWindows = (windows: (clear: Clear) => Map<WindowPart, number[]>, placed: THREE.Matrix4, look: Look) =>
+  const holdWindows = (windows: (clear: Clear) => Windows, placed: THREE.Matrix4, look: Look) =>
     held.push({ windows, placed: placed.clone(), wall: parts.length, look, blockZoom: inBlockZoomProps })
   /** `look` as the pattern shaded a shutter or a door on a wall of it (#277): the wall's paint, deeper. */
   const deeper = (look: Look) =>
@@ -801,12 +847,14 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
    * another part of its building: a door or a lamp the Zone put on the wall, a balcony, the glass of a lobby, the next
    * wing of an L. Contact shadows lie under them and do not count, nor does a bar (`WALL_WINDOWS.bar`). On a curtain
    * wall a part the glass runs behind does not count, nor round a round wall one sunk inside it (`Clear`, #279).
+   * Each wall's flower boxes, and the pots along its foot where it stands on the ground its brick lands on (`h` above
+   * the road), wait for the whole Block (`planted`).
    * ponytail: each part is taken as the box round it in the wall's frame, so a round or slanting part beside a flat wall
    * leaves out windows it only nears; and any part rooted in a curtain wall that stands out as far as its glass (a post,
    * a fin, but a canopy or a sign as well) has the glass run behind it. Test the window's boxes against the part's
    * triangles if a Zone ever lays one there.
    */
-  const buildWindows = () => {
+  const buildWindows = (h: number) => {
     const v = new THREE.Vector3()
     const laid = parts
       .slice(open)
@@ -834,10 +882,6 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
           .filter((size) => size <= WALL_WINDOWS.bar).length
         if (thin < 2) others.push({ box: there, reach })
       })
-      const reaches = (o: THREE.Box3, lo: THREE.Vector3, hi: THREE.Vector3) =>
-        Math.min(hi.x, o.max.x) - Math.max(lo.x, o.min.x) > WALL_WINDOWS.touch &&
-        Math.min(hi.y, o.max.y) - Math.max(lo.y, o.min.y) > WALL_WINDOWS.touch &&
-        Math.min(hi.z, o.max.z) - Math.max(lo.z, o.min.z) > WALL_WINDOWS.touch
       /**
        * Whether `o` stands through the box `lo` to `hi` the way out of its wall, toward `sign` along `axis` (#279): from
        * behind the box's back to within `WALL_WINDOWS.proud` of its front.
@@ -849,20 +893,217 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       }
       const clear: Clear = (lo, hi, { out, inside } = {}) =>
         !others.some(
-          ({ box, reach }) => reaches(box, lo, hi) && !(out && through(box, lo, hi, out)) && !(inside !== undefined && reach < inside),
+          ({ box, reach }) => meets(box, lo, hi) && !(out && through(box, lo, hi, out)) && !(inside !== undefined && reach < inside),
         )
       const was = inBlockZoomProps
       inBlockZoomProps = f.blockZoom
-      for (const [part, faces] of f.windows(clear)) {
-        const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(faces, 3))
-        geo.computeVertexNormals()
-        push(geo.applyMatrix4(f.placed), windowLook(part, f.look))
+      const { parts: built, plantings } = f.windows(clear)
+      const own = new Set<number>()
+      for (const [part, faces] of built) {
+        push(windowGeometry(faces, f.placed), windowLook(part, f.look))
         parts[parts.length - 1].window = true
+        own.add(parts.length - 1)
       }
       inBlockZoomProps = was
+      const ground = Math.abs(laid[f.wall - open]!.min.y - h) < PLANTING.ground
+      const kept = ground ? plantings : plantings.filter((p) => p.kind === 'box')
+      if (kept.length) planted.push({ ...f, plantings: kept, own, brick: bricks.length })
     }
     held.length = 0
   }
+  /** Faces as triangles in a wall's frame (`./wall-windows`), placed by `placed`. */
+  const windowGeometry = (faces: number[], placed: THREE.Matrix4) => {
+    const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(faces, 3))
+    geo.computeVertexNormals()
+    return geo.applyMatrix4(placed)
+  }
+  /**
+   * Low poly (#278): the flower boxes and pots of the walls built, each wall's, waiting for the whole Block to stand
+   * (`plant`): them in the wall's frame, how that frame stands, the wall's part and the parts its windows were built as,
+   * the brick it rides, its look, and whether it is a Block-zoom prop.
+   */
+  const planted: {
+    plantings: Planting[]
+    placed: THREE.Matrix4
+    wall: number
+    own: Set<number>
+    brick: number
+    look: Look
+    blockZoom: boolean
+  }[] = []
+  /** What a flower box's or a pot's shape is painted: its planter one of the pots', its leaves green or in bloom. */
+  const plantLook = (g: Solid) => {
+    const palette = g.paint === 'planter' ? HOME.pots : g.paint === 'leaves' ? LEAVES.round : BLOOMS
+    return palette[Math.floor(g.pick * palette.length)]
+  }
+  /** A flower box's or a pot's shape in its wall's frame, placed by `placed`. */
+  const plantGeometry = (g: Solid, placed: THREE.Matrix4) => {
+    const [size, mid] = [g.hi.clone().sub(g.lo), g.hi.clone().add(g.lo).multiplyScalar(0.5)]
+    const geo = PLANT_SHAPES[g.shape].clone().rotateY(g.turn).scale(size.x, size.y, size.z)
+    return geo.translate(mid.x, g.shape === 'pot' ? g.lo.y : mid.y, mid.z).applyMatrix4(placed)
+  }
+  /**
+   * Build the flower boxes and pots `planted` (#278) once the whole Block stands, each only where nothing else does at
+   * its Stage (in a Stage-up, what goes never stands with what comes), in the order its walls were built, each one built
+   * in the way of the next:
+   * - A flower box keeps off every part but its wall and that wall's windows, and where it hangs low enough to walk
+   *   into, off what stands under it and the ground claimed; its sill stands in for one that finds no room.
+   * - A pot keeps off every part but its wall, off the ground claimed but for its own building's, off the movers' ways
+   *   and the Walkers' (`PLANTING.walk`), and stands on something at its foot.
+   * Leaves and pots are Block-zoom props, as the kit's pot plants are; a flower box's planter is drawn at every zoom, as
+   * the sill it stands for is.
+   * ponytail: each part is taken as the box round it in the wall's frame, as `buildWindows` takes them, so a round or
+   * slanting part (a tree's crown, a planter set across a corner) leaves out a pot or a flower box it only nears. Test
+   * the planting's box against the part's triangles if the pots read too sparse beside such parts.
+   */
+  const plant = () => {
+    if (!planted.length) return
+    const v = new THREE.Vector3()
+    const fateOf = (brick: number): Fate => bricks[brick]?.fate ?? 'stays'
+    // In a Stage-up, what stays and what comes keep clear of what stands at the new Stage, so that the City it leaves has
+    // the flower boxes and pots it has when loaded; what goes, of what stood at the old one. A pot that stays may stand
+    // in something that goes, for as long as it takes to go.
+    const apart = (a: Fate, b: Fate) => (a === 'goes' ? b === 'comes' : b === 'goes')
+    const bounds = parts.map((p) =>
+      p.material.transparent ? null : new THREE.Box3().setFromBufferAttribute(p.geometry.attributes.position as THREE.BufferAttribute),
+    )
+    // The flower boxes and pots built so far, and every flower box's sill, which stands if the box does not: each one's
+    // box, as the corners of it on the map and the box round them, and the wall it stands on.
+    type Grown = { corners: THREE.Vector3[]; box: THREE.Box3; fate: Fate; on?: (typeof planted)[number] }
+    const cornersOf = (lo: THREE.Vector3, hi: THREE.Vector3, placed: THREE.Matrix4) =>
+      [0, 1, 2, 3, 4, 5, 6, 7].map((k) =>
+        new THREE.Vector3(k & 1 ? hi.x : lo.x, k & 2 ? hi.y : lo.y, k & 4 ? hi.z : lo.z).applyMatrix4(placed),
+      )
+    const grown: Grown[] = planted.flatMap((f) =>
+      f.plantings.flatMap((p) => {
+        if (!p.sill) return []
+        const corners = cornersOf(p.sill.lo, p.sill.hi, f.placed)
+        return [{ corners, box: new THREE.Box3().setFromPoints(corners), fate: fateOf(f.brick), on: f }]
+      }),
+    )
+    const was = inBlockZoomProps
+    for (const f of planted) {
+      const fate = fateOf(f.brick)
+      const into = f.placed.clone().invert()
+      const ry = Math.atan2(f.placed.elements[8], f.placed.elements[0])
+      /** A point in the wall's frame, on the map. */
+      const onMap = (x: number, y: number, z: number) => {
+        v.set(x, y, z).applyMatrix4(f.placed)
+        return { x: v.x, y: -v.z }
+      }
+      /** Part `i`'s box in the wall's frame, round its every point. */
+      const framed = (i: number) => {
+        const pos = parts[i].geometry.attributes.position
+        const box = new THREE.Box3()
+        for (let k = 0; k < pos.count; k++) box.expandByPoint(v.fromBufferAttribute(pos, k).applyMatrix4(into))
+        return box
+      }
+      const wall = framed(f.wall)
+      const middle = wall.getCenter(new THREE.Vector3())
+      const building = { ...onMap(middle.x, middle.y, middle.z), w: 0, d: 0, ry: 0 }
+      // Every other part round the wall that stands with it, and every flower box and pot, in the wall's frame. Where the
+      // wall stands square to the map, a part's box in its frame is the one round its box's corners; else that box is
+      // wider, and the one round its every point is worked out for a part whose wider box comes near (`exactly`).
+      const round = bounds[f.wall]!.clone().expandByScalar(PLANTING.near)
+      const square = Math.abs(Math.sin(2 * ry)) < 1e-6
+      type Near = { i: number; box: THREE.Box3; exact: boolean }
+      const exactly = (o: Near) => (o.exact ? o.box : ((o.exact = true), (o.box = framed(o.i))))
+      const near: Near[] = []
+      bounds.forEach((b, i) => {
+        if (b && i !== f.wall && !f.own.has(i) && b.intersectsBox(round) && !apart(fate, fateOf(parts[i].brick)))
+          near.push({ i, box: b.clone().applyMatrix4(into), exact: square })
+      })
+      for (const g of grown)
+        if (g.on !== f && g.box.intersectsBox(round) && !apart(fate, g.fate))
+          near.push({
+            i: -1,
+            box: new THREE.Box3().setFromPoints(g.corners.map((c) => c.clone().applyMatrix4(into))),
+            exact: true,
+          })
+      // The map round the wall, as far as its plantings reach; the ground claimed there that stands with it, but for its
+      // building's own, which the building's middle stands in; and the movers' ways there that stand with it.
+      const [x0, x1, y0, y1] = [round.min.x, round.max.x, -round.max.z, -round.min.z]
+      const theirs = claims.filter((c) => {
+        const r = Math.hypot(c.w, c.d) / 2
+        if (c.x + r < x0 || c.x - r > x1 || c.y + r < y0 || c.y - r > y1 || apart(fate, fateOf(c.brick))) return false
+        return !(c.kind === 'stand' && reach(building, 0, c, 0, false) > 0)
+      })
+      const ways = movers.filter((m) => {
+        const half = moverWidth(m.kind) / 2
+        const out = (k: 'x' | 'y', lo: number, hi: number) =>
+          m.loop.pts.every((q) => q[k] < lo - half) || m.loop.pts.every((q) => q[k] > hi + half)
+        return half > 0 && !apart(fate, fateOf(m.brick)) && !out('x', x0, x1) && !out('y', y0, y1)
+      })
+      /** Whether the ground under the box `lo` to `hi` keeps clear of the ground claimed round the wall. */
+      const unclaimedUnder = (lo: THREE.Vector3, hi: THREE.Vector3) => {
+        // Its ground as a claim has it: across the frame's x and its z, turned as the building is (`to`).
+        const mine = { ...onMap((lo.x + hi.x) / 2, lo.y, (lo.z + hi.z) / 2), w: hi.x - lo.x, d: hi.z - lo.z, ry }
+        return theirs.every(
+          (c) =>
+            Math.hypot(c.x - mine.x, c.y - mine.y) > (Math.hypot(c.w, c.d) + Math.hypot(mine.w, mine.d)) / 2 + 0.05 || // too far to meet
+            clearOf(mine, 0, c, 0),
+        )
+      }
+      /** Whether the box `lo` to `hi`, at the foot of the wall, stands clear of the Walkers' way and the movers'. */
+      const offTheWays = (lo: THREE.Vector3, hi: THREE.Vector3) => {
+        const corners = [lo.x, hi.x].flatMap((x) => [lo.z, hi.z].map((z) => onMap(x, lo.y, z)))
+        if (!corners.every((p) => onBlock(p.x, p.y, PLANTING.walk))) return false
+        const c = onMap((lo.x + hi.x) / 2, lo.y, (lo.z + hi.z) / 2)
+        const r = Math.hypot(hi.x - lo.x, hi.z - lo.z) / 2 // the circle round it
+        return ways.every((m) => {
+          const half = moverWidth(m.kind) / 2
+          return m.loop.pts.every((p, k) => !k || toSegment(c.x, c.y, m.loop.pts[k - 1], p) >= half + r)
+        })
+      }
+      // What the wall's flower boxes are built as, a part for each paint, as its windows are, and each pot, a part for
+      // each of its paints, so that what stands at the foot of the wall stands as itself (the scene check takes the
+      // outline round a part as where it stands); and the sills that stand in for flower boxes with no room.
+      const paints = new Map<string, { look: string; small: boolean; shapes: THREE.BufferGeometry[] }>()
+      const sills: number[] = []
+      for (const [n, p] of f.plantings.entries()) {
+        const pot = p.kind === 'pot'
+        const [cx, cz] = [(p.lo.x + p.hi.x) / 2, (p.lo.z + p.hi.z) / 2]
+        // What a pot stands on may rise a little into its foot; a flower box low enough to walk into keeps off what
+        // stands under it too, as a porch's pots.
+        const low = p.lo.y - wall.min.y < PLANTING.low
+        const lo = pot ? p.lo.clone().setY(p.lo.y + PLANTING.sink) : low ? p.lo.clone().setY(wall.min.y) : p.lo
+        const clear = near.every((o) => !meets(o.box, lo, p.hi) || !meets(exactly(o), lo, p.hi))
+        const standsOn = (o: THREE.Box3) =>
+          o.min.x <= cx && cx <= o.max.x && o.min.z <= cz && cz <= o.max.z && Math.abs(o.max.y - p.lo.y) <= PLANTING.sink
+        const fits = pot
+          ? clear && near.some((o) => standsOn(o.box) && standsOn(exactly(o))) && offTheWays(p.lo, p.hi) && unclaimedUnder(p.lo, p.hi)
+          : clear && (p.lo.y - wall.min.y >= PLANTING.low || unclaimedUnder(p.lo, p.hi))
+        if (!fits) {
+          sills.push(...(p.sill?.faces ?? []))
+          continue
+        }
+        for (const g of p.solids) {
+          const [look, small] = [plantLook(g), pot || g.shape === 'ball']
+          const key = `${look} ${small} ${pot ? n : -1}`
+          ;(paints.get(key) ?? paints.set(key, { look, small, shapes: [] }).get(key)!).shapes.push(plantGeometry(g, f.placed))
+        }
+        near.push({ i: -1, box: new THREE.Box3(p.lo, p.hi), exact: true })
+        const corners = cornersOf(p.lo, p.hi, f.placed)
+        grown.push({ corners, box: new THREE.Box3().setFromPoints(corners), fate })
+      }
+      for (const { look, small, shapes } of paints.values()) {
+        inBlockZoomProps = f.blockZoom || small
+        push(mergeGeometries(shapes)!, look)
+        for (const g of shapes) g.dispose()
+        parts[parts.length - 1].brick = f.brick
+      }
+      if (sills.length) {
+        inBlockZoomProps = f.blockZoom
+        push(windowGeometry(sills, f.placed), windowLook('sill', f.look))
+        parts[parts.length - 1].brick = f.brick
+        parts[parts.length - 1].window = true
+      }
+    }
+    inBlockZoomProps = was
+    planted.length = 0
+    open = parts.length
+  }
+
   /**
    * A pool of light on the ground at `(x, y)`, `h` above the road (#174), `w` by `d` and turned `ry`, in the colour and
    * strength of `kind`'s light, where the kit builds with pools, or for the kerbside's own lights on every Tile as far
@@ -902,13 +1143,24 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   }
   /** A pot plant `s` m tall at `(x, y)`, `h` above the road (#175): a pot from `draw`'s colours under a bush of leaves. */
   const pot = (x: number, y: number, h: number, s: number, draw: () => number) => {
-    add(POT, HOME.pots[Math.floor(draw() * HOME.pots.length)], x, y, h, 0, s * 0.42, s * 0.55, s * 0.42)
-    add(BUSH, LEAVES.round[Math.floor(draw() * LEAVES.round.length)], x, y, h + s * 0.78, draw() * TAU, s * 0.5, s * 0.42, s * 0.5)
+    const [pot, leaves] = [(s * POT_PLANT.pot) / 2, (s * POT_PLANT.leaves) / 2]
+    add(POT, HOME.pots[Math.floor(draw() * HOME.pots.length)], x, y, h, 0, pot, s * POT_PLANT.potTall, pot)
+    add(
+      BUSH,
+      LEAVES.round[Math.floor(draw() * LEAVES.round.length)],
+      x,
+      y,
+      h + s * POT_PLANT.lift,
+      draw() * TAU,
+      leaves,
+      (s * POT_PLANT.leavesTall) / 2,
+      leaves,
+    )
   }
   /** Close the shapes added since the last brick into one, which lands on `(x, y)`, `h` above the road. */
   const brick = (kind: BrickKind, x: number, y: number, h: number, dust = 0) => {
     if (open === parts.length) return
-    if (held.length) buildWindows()
+    if (held.length) buildWindows(h)
     for (let i = open; i < parts.length; i++) parts[i].brick = bricks.length
     open = parts.length
     bricks.push(made(kind, new THREE.Vector3(x, h, -y), dust))
@@ -1197,7 +1449,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
      */
     muted(fn: () => void, when = true) {
       if (!when) return fn()
-      const lists = [parts, bricks, movers, plumes, beacons, sways, flags, pools, claims, scenes, forms] as unknown[][]
+      const lists = [parts, bricks, movers, plumes, beacons, sways, flags, pools, claims, scenes, forms, planted] as unknown[][]
       const [at, claimed] = [lists.map((l) => l.length), claims.length]
       fn()
       const kept = claims.slice(claimed).filter((c) => c.kind === 'stand')
@@ -1707,6 +1959,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       forms: Form[]
     } {
       if (open < parts.length) throw new Error('the kit has shapes left out of any brick')
+      plant()
       for (const shapes of cut) {
         for (const g of [...shapes.values()].flat()) g.dispose()
         shapes.clear()

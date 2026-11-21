@@ -3,10 +3,10 @@ import { mulberry32 } from '../../sim/demand'
 import { middle, polyline, type Vec } from '../../sim/geometry'
 import { area, KERB, type Block } from '../blocks'
 import { inside, type Field } from '../field'
-import { type Kit, SHAPES, spot, to } from '../kit'
+import { BLOOMS, type Kit, SHAPES, spot, to } from '../kit'
 import { clearOf, DECK, fountain, GRASS, GROW, overlay, PLAZA, site, STONE } from '../landmarks'
 import { PATTERN } from '../pattern'
-import { BLOOMS, bench, GLOWS, pavilionLantern, ROCKS, shrine, STONE as STONES, stoneLantern, WOOD } from '../props'
+import { bench, GLOWS, pavilionLantern, ROCKS, shrine, STONE as STONES, stoneLantern, WOOD } from '../props'
 import { ribbons } from '../ribbons'
 import {
   alongRun,
