@@ -5,7 +5,7 @@ import type { Lane, Network } from '../sim/network'
 import type { NetworkSpec } from '../sim/spec'
 import { CELL, cellAt } from '../sim/tiles'
 import { KERB, type Block } from './blocks'
-import { driveCorners, driveOf, onDrive, plainDrive } from './drive'
+import { driveCorners, driveOf, nearDrive, plainDrive } from './drive'
 import { inside, type Field } from './field'
 import type { Kit } from './kit'
 import { bikeLane, island, site, tower, towerGround } from './landmarks'
@@ -119,7 +119,7 @@ export function fillBlock(kit: Kit, block: Block, { net, spec, scenery, field, z
   // keep clear of is left off. It is laid before what fills the Block, which keeps off its ground.
   const spots = lampSpots(block, field)
   const drive = zone ? driveOf(block, net, field, poles, [...spots, ...avenueTrees]) : null
-  const [lamps, kerbsideTrees] = [spots, avenueTrees].map((l) => (drive ? l.filter((q) => !onDrive(drive, q)) : l))
+  const [lamps, kerbsideTrees] = [spots, avenueTrees].map((l) => (drive ? l.filter((q) => !nearDrive(drive, q)) : l))
   for (const { x, y } of lamps) kit.lamp(x, y, KERB)
   const from = kit.mark() // what stands on the Block from here on, which the street furniture keeps off
   /**

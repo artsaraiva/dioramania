@@ -5,7 +5,7 @@ import { KERB, twiceArea, type Block } from './blocks'
 import type { Field } from './field'
 import { to, type Kit } from './kit'
 import { walk, type Footprint } from './kerbside'
-import { turned } from './zones/ground'
+import { near, turned } from './zones/ground'
 
 // A Block's Drive (#327): the one place on its kerb where a vehicle turns off the Road. It sits on the Block's longest
 // Road frontage, as far from the Tile's Junction as the Block allows, clear of the utility poles that stand there
@@ -31,7 +31,7 @@ export type Drive = Footprint
 /**
  * The Block's Drive: on its longest Road frontage that has room, as far from its Tile's Junction as the frontage allows,
  * its ground clear of each of `fixed` (the utility poles round the Block) and, where the frontage has room for that too,
- * of each of `movable` (its lamps and street trees: the caller leaves off those `onDrive` finds on it, as on a short
+ * of each of `movable` (its lamps and street trees: the caller leaves off those `nearDrive` finds on it, as on a short
  * arm of a Roundabout). Null if no frontage has room, as on a Block that faces no Road.
  */
 export function driveOf(block: Block, net: Network, field: Field, fixed: Vec[], movable: Vec[]): Drive | null {
@@ -96,7 +96,7 @@ export function driveOf(block: Block, net: Network, field: Field, fixed: Vec[], 
         const ry = Math.atan2(b.y - a.y, b.x - a.x) + (turn > 0 ? 0 : Math.PI) // the way in to the left
         const [x, y] = to(p.x, p.y, ry, 0, d / 2)
         const ground = { x, y, ry, w, d }
-        const clear = keep.every((q) => !within(ground, q, room))
+        const clear = keep.every((q) => !near(ground, q.x, q.y, room))
         const onBlock = [-w / 2, 0, w / 2].every((u) => field.sample(...to(x, y, ry, u, d / 2)) > 0)
         const away = Math.hypot(p.x - junction.x, p.y - junction.y)
         if (clear && onBlock && away > far) [best, far] = [ground, away]
@@ -108,14 +108,7 @@ export function driveOf(block: Block, net: Network, field: Field, fixed: Vec[], 
 }
 
 /** Whether `q`, a lamp or a street tree, stands on the Drive or too near it to be left standing. */
-export const onDrive = (drive: Drive, q: Vec) => within(drive, q, DRIVE.room)
-
-/** Whether `q` lies on ground `g`, or within `room` m of it. */
-function within(g: Drive, q: Vec, room: number): boolean {
-  const [dx, dy] = [q.x - g.x, q.y - g.y]
-  const [u, v] = [dx * Math.cos(g.ry) + dy * Math.sin(g.ry), -dx * Math.sin(g.ry) + dy * Math.cos(g.ry)]
-  return Math.abs(u) < g.w / 2 + room && Math.abs(v) < g.d / 2 + room
-}
+export const nearDrive = (drive: Drive, q: Vec) => near(drive, q.x, q.y, DRIVE.room)
 
 /** Points over a Drive's ground, its corners, the middles of its sides and its centre: what a landmark's site keeps off. */
 export function driveCorners({ x, y, ry, w, d }: Drive): Vec[] {

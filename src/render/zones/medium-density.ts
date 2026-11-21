@@ -137,8 +137,8 @@ function terraces(g: ZoneGround) {
   const open = new Set(scenes.flatMap((s) => s.lots)) // the lots the scenes take
   // And the lots on the Drive (#327), each drawn as it was and left empty, so that no other lot changes: what stands by
   // a house's walls keeps off both.
-  const drive = lots.flatMap((l, i) => (onDrive(g, l) ? [i] : []))
-  const empty = new Set([...open, ...drive])
+  const lotsOnDrive = lots.flatMap((l, i) => (onDrive(g, l) ? [i] : []))
+  const empty = new Set([...open, ...lotsOnDrive])
   const storeys: number[] = []
   const planned: TerracePlan[] = []
   const signs: RowLot[] = [] // the corner shops' end walls, where no rack or stairs stand
@@ -160,7 +160,7 @@ function terraces(g: ZoneGround) {
         signs.push({ ...turned(l.x, l.y, l.ry, plan.corner.end * (l.w / 2 + 0.8), l.d / 2 - 1.3), w: 1.6, d: 2.8, ry: l.ry, onRoad: false })
       }
       kit.staged((stage) => townhouse(kit, l.x, l.y, KERB, l.w, l.d, l.ry, TERRACE_STOREYS(s, stage), stage, plan))
-    }, drive.includes(i))
+    }, lotsOnDrive.includes(i))
   }
   kit.lot(-1)
   yards(g, lots, TERRACES.trees, kit.finished)

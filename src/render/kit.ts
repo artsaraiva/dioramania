@@ -1140,9 +1140,9 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
     muted(fn: () => void, when = true) {
       if (!when) return fn()
       const lists = [parts, bricks, movers, plumes, beacons, sways, flags, pools, claims, scenes, forms] as unknown[][]
-      const at = lists.map((l) => l.length)
+      const [at, claimed] = [lists.map((l) => l.length), claims.length]
       fn()
-      const kept = claims.slice(at[8]).filter((c) => c.kind === 'stand')
+      const kept = claims.slice(claimed).filter((c) => c.kind === 'stand')
       for (const p of parts.slice(at[0])) p.geometry.dispose()
       lists.forEach((l, i) => (l.length = at[i]))
       claims.push(...kept.map((c) => ({ ...c, brick: bricks.length }))) // riding the next brick closed, as they did
