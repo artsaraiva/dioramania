@@ -141,8 +141,8 @@ Decisions the user made
 The look
 
 - One switch in the shared materials and shapes, not a second set of builders: flat shading on every scenery, car and Walker material; the kit's sphere, cylinder and cone become few-sided (a roughened twenty- or eighty-face ball for leaves); the rounded box becomes a box with one-step cut corners.
-- Flat colour replaces the surface pattern on every wall, roof and ground. Each part's colour is shifted in lightness by up to about ±2%, decided by where the part stands, so the same City always tones the same way.
-- Where a wall would have worn a windowed pattern, the kit builds its windows as boxes from the same bay and storey sizes the pattern used: a pane in every bay of every storey; a sill, or for about a third of windows a flower box; shutters where the pattern drew them; a door in the middle bay of the ground floor where the pattern drew one; a high strip on shed walls. Which panes light at night comes from the wall's own seed, so the kit's random stream, and with it the City's layout, is the same as today.
+- Flat colour replaces the surface pattern on every wall, roof and ground. Each part's colour is shifted in lightness by up to about ±2%, decided by where the part stands, so the same City always tones the same way. (Built in OKLab's lightness, its chroma kept a hair under, so that toning never takes a colour past the Jam red's cap; and no corner of a rough ball hangs below the sphere it stands for, so a tree's crown is no nearer the ground than the Zones spaced it for: #277.)
+- Where a wall would have worn a windowed pattern, the kit builds its windows as boxes from the same bay and storey sizes the pattern used: a pane in every bay of every storey; a sill, or for about a third of windows a flower box; shutters where the pattern drew them; a door in the middle bay of the ground floor where the pattern drew one; a high strip on shed walls. Which panes light at night comes from the wall's own seed, so the kit's random stream, and with it the City's layout, is the same as today. Built (#277, `src/render/wall-windows.ts`): each window's measures are its pattern layer's, and a window that would reach into another part of its building (a door, a lamp, a balcony's glass, the next wing of an L) is left out whole, as the pattern was covered there; a bar across it (a rail, a post, a ladder's stile, a pipe) leaves it be. The street furniture keeps off a building as the pattern left it, so it stands where it did. A shed's wall gets no door, as its pattern drew none.
 - Along the foot of a ground-floor wall, pots of leaves stand at about three in five bay boundaries.
 - Shadows are hard: the shadow map is read without blur.
 - The towers of high-density residential, which kept an older path that built windows as geometry, go through the same wall-window path as every other Zone.
@@ -274,7 +274,7 @@ Rough spots in the prototype
 
 - A parking car glides in a straight line from its lane across the pavement to its Stand, and jumps back when it leaves.
 - Of seven Stands found on the three Tiles, five could be bound to a lane.
-- Shed walls get a door on every patterned wall, so some doors face a wall or a neighbour.
+- Shed walls get a door on every patterned wall, so some doors face a wall or a neighbour. (#277 follows the pattern: none.)
 - Off the pavement a Walker walks straight to a door or a bench and can pass through a planter, a pot or a corner of a building.
 - Pots are placed along every ground-floor wall without checking what stands beside it, so a pot can poke into the next building.
 - A lamp's pool of light on the ground fades up with the old even fade, before its lamp switches on.
