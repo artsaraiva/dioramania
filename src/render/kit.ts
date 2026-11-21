@@ -686,6 +686,8 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   const pools: Pool[] = []
   // What the scene check reads (#191): the ground laid to be kept clear, the scenes and the lots' building forms.
   const claims: Claim[] = []
+  // Where a Walker could go: a door's step, a bench's seat (#288), each riding the next brick closed, as a claim does.
+  const places: { kind: 'door' | 'bench'; x: number; y: number; ry: number; h?: number; brick: number }[] = []
   const scenes: Scene[] = []
   const forms: Form[] = []
   let scene = -1 // the scene the bricks closed from now on belong to
@@ -717,8 +719,11 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
    * The way through a door `w` wide in a wall at `(x, y)` facing `ry`, from `out` m out from it, as a claim (#191): 1.2 m
    * deep, and as wide as the door less 0.2 m either side, where its frame stands and pot plants may flank it.
    */
-  const doorway = (x: number, y: number, ry: number, w: number, out = 0) =>
-    claim('door', ...to(x, y, ry, 0, out + 0.6), Math.max(0.6, w - 0.4), 1.2, ry)
+  const doorway = (x: number, y: number, ry: number, w: number, out = 0) => {
+    const [px, py] = to(x, y, ry, 0, out + 0.6)
+    claim('door', px, py, Math.max(0.6, w - 0.4), 1.2, ry)
+    places.push({ kind: 'door', x: px, y: py, ry, brick: bricks.length })
+  }
   // Whether what is built from here on wears surface pattern and leaves pools of light (`finish`), and whether it is a
   // Block-zoom prop, painted on `blockZoom` (`blockZoomProps`).
   let [patterned, pooled, inBlockZoomProps] = [false, false, false]
@@ -897,7 +902,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
         )
       const was = inBlockZoomProps
       inBlockZoomProps = f.blockZoom
-      const { parts: built, plantings } = f.windows(clear)
+      const { parts: built, plantings, doors } = f.windows(clear)
       const own = new Set<number>()
       for (const [part, faces] of built) {
         push(windowGeometry(faces, f.placed), windowLook(part, f.look))
@@ -906,6 +911,18 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       }
       inBlockZoomProps = was
       const ground = Math.abs(laid[f.wall - open]!.min.y - h) < PLANTING.ground
+      if (ground)
+        for (const { at, out } of doors) {
+          // Out from the door's foot, in map coords (y = -z): the way it faces is `ry` as the kit's frames turn.
+          const [foot, way] = [at.clone().applyMatrix4(f.placed), out.clone().transformDirection(f.placed)]
+          places.push({
+            kind: 'door',
+            x: foot.x + 0.6 * way.x,
+            y: -foot.z - 0.6 * way.z,
+            ry: Math.atan2(-way.x, -way.z),
+            brick: bricks.length,
+          })
+        }
       const kept = ground ? plantings : plantings.filter((p) => p.kind === 'box')
       if (kept.length) planted.push({ ...f, plantings: kept, own, brick: bricks.length })
     }
@@ -1449,7 +1466,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
      */
     muted(fn: () => void, when = true) {
       if (!when) return fn()
-      const lists = [parts, bricks, movers, plumes, beacons, sways, flags, pools, claims, scenes, forms, planted] as unknown[][]
+      const lists = [parts, bricks, movers, plumes, beacons, sways, flags, pools, claims, places, scenes, forms, planted] as unknown[][]
       const [at, claimed] = [lists.map((l) => l.length), claims.length]
       fn()
       const kept = claims.slice(claimed).filter((c) => c.kind === 'stand')
@@ -1876,6 +1893,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
         local(cuboid(0.08, 0.05, 0.56), BENCH.iron, x, y, ry, lx, 0.02, h + 0.66)
       }
       shadow(x, y, h, 2.8, 1.4, true, ry) // round, as the trees' are: a meadow then draws no other shadow
+      places.push({ kind: 'bench', x, y, ry, h, brick: bricks.length }) // the seat's middle is the bench's
       brick('building', x, y, h)
     },
 
@@ -1955,6 +1973,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       flags: Flag[]
       pools: Pool[]
       claims: Claim[]
+      places: typeof places
       scenes: Scene[]
       forms: Form[]
     } {
@@ -1964,7 +1983,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
         for (const g of [...shapes.values()].flat()) g.dispose()
         shapes.clear()
       }
-      return { parts, bricks, movers, plumes, beacons, sways, flags, pools, claims, scenes, forms }
+      return { parts, bricks, movers, plumes, beacons, sways, flags, pools, claims, places, scenes, forms }
     },
   }
 }

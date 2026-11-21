@@ -1,7 +1,7 @@
 import * as THREE from 'three'
-import { pointAt, type Bounds } from '../sim/geometry'
+import type { Bounds, Vec } from '../sim/geometry'
 import type { Network } from '../sim/network'
-import { Walkers, type Kind, type Walker } from '../walkers/walkers'
+import { whereIs, Walkers, type Kind, type Place, type Walker } from '../walkers/walkers'
 import { KERB } from './blocks'
 import { inside, type Field } from './field'
 import { LOW_POLY } from './look'
@@ -13,6 +13,10 @@ const SHIRTS = ['#db6982', '#009dcb', '#ffc52d', '#ffffff', '#64cb9f', '#bc9ef2'
 // What a Walker wears, and where in its stride it is, from bits of its own seed: the same Walker looks the same every time.
 const paintOf = (walker: Walker) => SHIRTS[walker.seed % SHIRTS.length]
 const phaseOf = (walker: Walker) => ((walker.seed >>> 3) % 1000) / 100
+// Whether a Walker talks with a hand when stopped with another, or sat beside them: most do.
+const talks = (walker: Walker) => walker.seed % 5 < 3
+const SEAT = 0.52 // m up from the pavement the top of a bench's seat is
+const EASE = 5 // how quickly a walker sits, gets up, stops swinging and turns, per s
 
 const [BODY, LEFT_LEG, RIGHT_LEG, LEFT_ARM, RIGHT_ARM, HEAD] = [0, 1, 2, 3, 4, 5]
 const SWING = 0.62 // how far a leg swings either way, in radians
@@ -140,8 +144,10 @@ const jointed = (shader: THREE.WebGLProgramParametersWithUniforms) => {
 
 /**
  * The City's Walkers on the pavement, one instanced mesh per kind (#176), as `../walkers/walkers` has them: who each
- * is, and where they walk, comes from there, seeded `seed`, the City's. Each faces the way it walks, its legs and arms
- * swinging in step with the ground it covers (#287); its shadow moves with them.
+ * is, where they walk and what they do comes from there, seeded `seed`, the City's. Each faces the way it walks, its
+ * legs and arms swinging in step with the ground it covers (#287), and stops swinging as it stops (#288): it goes out
+ * of sight in at a door, sits down on a bench, turns its head about, and talks with a hand beside the other of a two;
+ * its shadow moves with it.
  */
 export function createWalkers(seed: number) {
   const group = new THREE.Group()
@@ -155,14 +161,19 @@ export function createWalkers(seed: number) {
   shadow.onBeforeCompile = jointed
   const walkers = new Walkers(seed)
   let meshes = new Map<Kind, THREE.InstancedMesh>()
-  const [m, q, at, up, one] = [
+  const [m, q, at, up, scale] = [
     new THREE.Matrix4(),
     new THREE.Quaternion(),
     new THREE.Vector3(),
     new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(1, 1, 1),
+    new THREE.Vector3(),
   ]
   let t = 0
+  /** How each walker is shown, eased frame by frame: where in its stride, how far it swings, sits and shows, and where it is and faces. */
+  const shown = new WeakMap<
+    Walker,
+    { stride: number; swing: number; sit: number; size: number; arm: number; x: number; y: number; heading: number }
+  >()
 
   /** New instanced meshes for the walkers there are now. */
   const remesh = () => {
@@ -189,16 +200,28 @@ export function createWalkers(seed: number) {
   return {
     group,
 
-    /** Walkers on the pavement of the pieces of slab `pieces`, laid in `field`. Nobody can reach a roundabout's island. */
-    add(net: Network, field: Field, pieces: Bounds[]) {
+    /**
+     * Walkers on the pavement of the pieces of slab `pieces`, laid in `field`, and their ways to `places`, round
+     * `obstacles` (see `Walkers.add`). Nobody can reach a roundabout's island.
+     * shortcut: the ways cost up to 18 ms a Tile (about 10 ms on average, M4 Pro), as does `refit`'s at a Stage-up, a
+     * dropped frame; work them out over frames if it shows.
+     */
+    add(net: Network, field: Field, pieces: Bounds[], places: readonly Place[] = [], obstacles: readonly Vec[][] = []) {
       const islands = net.junctions.filter((j) => j.type === 'roundabout').map((j) => j.at)
       for (const piece of pieces) {
         walkers.add(
           piece,
           field.outlines(INSET, [piece]).filter((loop) => !islands.some((at) => inside(loop, at.x, at.y))),
+          places,
+          obstacles,
         )
       }
       remesh()
+    },
+
+    /** The `places` and `obstacles` of the pieces of slab `pieces` as they stand after a Stage-up or a Rezoning. */
+    refit(pieces: Bounds[], places: readonly Place[], obstacles: readonly Vec[][]) {
+      for (const piece of pieces) walkers.refit(piece, places, obstacles)
     },
 
     /** Take the walkers off the pieces of slab `pieces`, which a Swap or an Undo is lifting. */
@@ -212,19 +235,38 @@ export function createWalkers(seed: number) {
       t += dt
       walkers.step(dt)
       const index = new Map<Kind, number>(ORDER.map((k) => [k, 0]))
+      const ease = Math.min(1, dt * EASE)
       for (const walker of walkers.all) {
-        const p = pointAt(walker.line, walker.s)
-        at.set(p.x, KERB, -p.y)
-        q.setFromAxisAngle(up, p.heading + (walker.speed < 0 ? Math.PI : 0)) // facing the way it walks
+        const p = whereIs(walker)
+        const look = shown.get(walker) ?? { stride: phaseOf(walker), swing: 1, sit: 0, size: 1, arm: 0, ...p }
+        shown.set(walker, look)
+        const moving = walker.doing === 'stroll' || walker.doing === 'go' || walker.doing === 'back'
+        const act = walker.doing === 'act' ? walker.way?.place.kind : undefined
+        // One whole stride is 2π, of the ground it has covered.
+        look.stride = (look.stride + (Math.hypot(p.x - look.x, p.y - look.y) * Math.PI * 2) / strideOf(walker.kind)) % (Math.PI * 2)
+        look.swing += ((moving ? 1 : 0) - look.swing) * ease
+        look.sit += ((act === 'bench' ? 1 : 0) - look.sit) * ease
+        look.size += ((act === 'door' ? 0 : 1) - look.size) * ease
+        const talking = (walker.doing === 'stop' || act === 'bench') && walker.side !== 0 && talks(walker) && look.size > 0.9
+        look.arm += ((talking ? 1.25 + Math.sin(t * 5 + phaseOf(walker)) * 0.3 : 0) - look.arm) * ease
+        look.heading += Math.atan2(Math.sin(p.heading - look.heading), Math.cos(p.heading - look.heading)) * ease
+        ;[look.x, look.y] = [p.x, p.y]
+        // Sat beside the other of a two, it turns to them; stopped, it looks about; walking, a little.
+        const phase = phaseOf(walker)
+        const head =
+          act === 'bench' && walker.side
+            ? walker.side * 1.2 + Math.sin(t * 0.9 + phase) * 0.2
+            : moving
+              ? Math.sin(t * 0.5 + phase) * 0.18
+              : Math.sin(t * 0.9 + phase) * 0.5
+        at.set(look.x, KERB - look.sit * (FIGURES[walker.kind].hip - SEAT), -look.y)
+        q.setFromAxisAngle(up, look.heading)
         const i = index.get(walker.kind)!
         index.set(walker.kind, i + 1)
         const mesh = meshes.get(walker.kind)!
-        mesh.setMatrixAt(i, m.compose(at, q, one))
-        // One whole stride is 2π.
-        // ponytail: the ground a walker has covered is |speed| × t while every walker walks on at a steady speed; count
-        // it up frame by frame once walkers stop (#288), or the stride jumps as they walk on.
-        const stride = (phaseOf(walker) + (Math.abs(walker.speed) * t * Math.PI * 2) / strideOf(walker.kind)) % (Math.PI * 2)
-        ;(mesh.geometry.attributes.pose as THREE.InstancedBufferAttribute).setXYZW(i, stride, 1, 0, 0)
+        mesh.setMatrixAt(i, m.compose(at, q, scale.setScalar(look.size)))
+        const pose = mesh.geometry.attributes.pose as THREE.InstancedBufferAttribute
+        pose.setXYZW(i, look.stride, look.sit > 0.05 ? -look.sit : look.swing, look.arm, head)
       }
       for (const mesh of meshes.values()) {
         mesh.instanceMatrix.needsUpdate = true
