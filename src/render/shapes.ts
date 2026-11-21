@@ -40,8 +40,36 @@ export function nudge(a: number, b: number, c: number, d = 0): number {
 }
 
 /**
+ * `colour` (linear, as three's colours are) toned `by` lighter in OKLab's lightness, darker if below 0, its hue kept and
+ * its chroma `chroma` of what it was: a part toned in the low-poly look (`./look`) never grows more vivid, as a lighter
+ * or darker shade in HSL can, so a colour held under the Jam red's chroma stays under it (#277).
+ */
+export function tone(colour: THREE.Color, by: number, chroma = 1): THREE.Color {
+  const { r, g, b } = colour
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+  const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s + by
+  const A = (1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s) * chroma
+  const B = (0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s) * chroma
+  const [l3, m3, s3] = [
+    L + 0.3963377774 * A + 0.2158037573 * B,
+    L - 0.1055613458 * A - 0.0638541728 * B,
+    L - 0.0894841775 * A - 1.291485548 * B,
+  ].map((c) => c * c * c)
+  const clamp = (c: number) => Math.min(1, Math.max(0, c))
+  return colour.setRGB(
+    clamp(4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3),
+    clamp(-1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3),
+    clamp(-0.0041960863 * l3 - 0.7034186147 * m3 + 1.707614701 * s3),
+  )
+}
+
+/**
  * A ball of eighty flat faces and radius about 1, every corner pushed in or out by up to `rough` of it: the low-poly
- * look's sphere (`./look`). `seed` picks which way each corner goes, the same on every load.
+ * look's sphere (`./look`). `seed` picks which way each corner goes, the same on every load. No corner hangs lower than
+ * the sphere's foot, so a tree's crown reaches no nearer the ground than it does in the other look, where what stands
+ * round it was spaced for (#277).
  */
 export function roughBall(seed: number, rough: number): THREE.BufferGeometry {
   const g = new THREE.IcosahedronGeometry(1, 1)
@@ -51,7 +79,7 @@ export function roughBall(seed: number, rough: number): THREE.BufferGeometry {
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i)
     v.multiplyScalar(1 + nudge(seed, at(v.x), at(v.y), at(v.z)) * rough)
-    p.setXYZ(i, v.x, v.y, v.z)
+    p.setXYZ(i, v.x, Math.max(-1, v.y), v.z)
   }
   g.computeVertexNormals()
   // Indexed, as the sphere it stands in for is: a builder's `toNonIndexed()` then takes a copy, not the shared ball.

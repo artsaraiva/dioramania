@@ -9,7 +9,8 @@ import type { Glow } from './day'
 import { LOW_POLY } from './look'
 import type { Beacon, BeaconColour, Flag, FlagKind, Mover, MoverKind, Plume, PlumeKind, Pool, Sway, SwayKind } from './movers'
 import { clad, createPatterns, pave, PATTERN, tile, wrap, type Cladding, type Pattern } from './pattern'
-import { canvasTexture, gable, hip, nudge, roughBall, roundedBox, tint } from './shapes'
+import { canvasTexture, gable, hip, nudge, roughBall, roundedBox, tint, tone } from './shapes'
+import { type Clear, type WindowPart, wallWindows, windowed, wrapsWindows, wrapWindows } from './wall-windows'
 
 const TAU = Math.PI * 2
 // Low poly, lit windows and lamps are about a quarter dimmer, under the blend's glow (`./blend`, #283).
@@ -433,8 +434,19 @@ export interface Finish {
 // Block-zoom props (#173, #175): the zoom (as the camera's) from which they start to fade in, and the zoom at which
 // they stand whole. Tile zoom, one Tile filling the screen, is about 4; City zoom, the whole City in frame, is under 1.
 const BLOCK_ZOOM = { from: 2.2, to: 3.2 }
-/** Low poly (`./look`): how much lighter or darker than its colour a part may be toned, as a share of full lightness. */
-const TONE = 0.02
+/**
+ * Low poly (`./look`): how much lighter or darker than its colour a part may be toned, in OKLab lightness (0 to 1), and
+ * the share of its chroma it keeps, a hair less, so that rounding to a screen's 8 bits never lifts a colour held at the
+ * Jam red's cap over it (#277).
+ */
+const TONE = { by: 0.02, chroma: 0.985 }
+/**
+ * Low poly (`./look`, #277): how much darker than its wall a shutter or a door is, as the pattern shaded them (86 of 128,
+ * near enough); how far a window's box may reach into another part of its building, in m, before it is left out; how
+ * far round a wall to look for those parts; and how thin, two ways, a part is that covers no window, as a rail, a post,
+ * a ladder's stile or a pipe does not.
+ */
+const WALL_WINDOWS = { shade: 0.66, touch: 0.005, near: 0.5, bar: 0.15 }
 
 /**
  * The materials of the static scenery, shared by every Block so that all of them merge into one mesh per material.
@@ -667,14 +679,14 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   const glowing = (geo: THREE.BufferGeometry, glow: number) =>
     geo.setAttribute('glow', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(glow), 1))
   /**
-   * `colour` up to `TONE` lighter or darker, by where `geo` stands: low poly (`./look`), parts painted one colour on the
+   * `colour` up to `TONE.by` lighter or darker, by where `geo` stands: low poly (`./look`), parts painted one colour on the
    * soft-lit scenery are not quite one tone, so that a large flat area is not dead, and a part tones the same way on
    * every load. Glass, bulbs and what is drawn instanced keep their colour.
    */
   const toned = (geo: THREE.BufferGeometry, colour: string) => {
     const p = geo.attributes.position
     const at = (v: number) => Math.round(v * 10) // to 10 cm, past the float's last digits
-    return new THREE.Color(colour).offsetHSL(0, 0, nudge(at(p.getX(0)), at(p.getY(0)), at(p.getZ(0))) * TONE)
+    return tone(new THREE.Color(colour), nudge(at(p.getX(0)), at(p.getY(0)), at(p.getZ(0))) * TONE.by, TONE.chroma)
   }
   /** Add a geometry that is already in place (Three coordinates). The kit takes it over. */
   const push = (geo: THREE.BufferGeometry, look: Look) => {
@@ -708,7 +720,88 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   ) => {
     if (!patterned) return add(geo, look, x, y, h, ry)
     const g = clad(geo.index ? geo.toNonIndexed() : geo.clone(), cladding, mulberry32(seed)())
-    push(g.applyMatrix4(m.compose(new THREE.Vector3(x, h, -y), q.setFromAxisAngle(up, ry), new THREE.Vector3(1, 1, 1))), look)
+    const placed = m.compose(new THREE.Vector3(x, h, -y), q.setFromAxisAngle(up, ry), new THREE.Vector3(1, 1, 1))
+    if (LOW_POLY && windowed(cladding)) {
+      const { min, max } = g.boundingBox!.clone() // in its own frame, as `clad` measured it
+      holdWindows((clear) => wallWindows(min, max, cladding, seed, clear), placed, look)
+    }
+    push(g.applyMatrix4(placed), look)
+  }
+  /**
+   * Low poly (`./look`, #277): the windows of the walls added since the last brick, which `brick` builds as boxes when it
+   * closes, once whatever else the building puts on its walls is there to keep clear of. Each wall's: its windows in its
+   * own frame, how that frame stands, its part, its look, and whether it is a Block-zoom prop.
+   */
+  const held: {
+    windows: (clear: Clear) => Map<WindowPart, number[]>
+    placed: THREE.Matrix4
+    wall: number
+    look: Look
+    blockZoom: boolean
+  }[] = []
+  /** Hold the windows of the wall about to be added, `placed` in the map, painted `look`, for `brick` to build (`held`). */
+  const holdWindows = (windows: (clear: Clear) => Map<WindowPart, number[]>, placed: THREE.Matrix4, look: Look) =>
+    held.push({ windows, placed: placed.clone(), wall: parts.length, look, blockZoom: inBlockZoomProps })
+  /**
+   * The parts the windows were built as (#277), which `since` leaves out: the street furniture keeps off a building as
+   * the surface pattern left it, so that the look never moves it.
+   */
+  const windowParts = new WeakSet<Part>()
+  /** `look` as the pattern shaded a shutter or a door on a wall of it (#277): the wall's paint, deeper. */
+  const deeper = (look: Look) =>
+    typeof look === 'string' ? `#${new THREE.Color(look).multiplyScalar(WALL_WINDOWS.shade).getHexString()}` : AERIAL
+  /** What a part of a wall's windows is painted (#277): the glass in its tint or left dark, the trim, or its wall's paint deeper. */
+  const windowLook = (part: WindowPart, wall: Look): Look =>
+    part === 'sill'
+      ? FRONTAGE.trim
+      : part === 'shutter' || part === 'door'
+        ? deeper(wall)
+        : { material: glass, tint: part === 'dark' ? unlit : windows[part] }
+  /**
+   * Build the windows `held` (#277), each wall's as the brick closes, leaving out each window that would reach into
+   * another part of its building: a door or a lamp the Zone put on the wall, a balcony, the glass of a lobby, the next
+   * wing of an L. Contact shadows lie under them and do not count, nor does a bar (`WALL_WINDOWS.bar`).
+   * ponytail: each part is taken as the box round it in the wall's frame, so a round or slanting part beside a wall
+   * leaves out windows it only nears. Test the window's boxes against the part's triangles if a Zone ever lays one there.
+   */
+  const buildWindows = () => {
+    const v = new THREE.Vector3()
+    const laid = parts
+      .slice(open)
+      .map((p) =>
+        p.material.transparent ? null : new THREE.Box3().setFromBufferAttribute(p.geometry.attributes.position as THREE.BufferAttribute),
+      )
+    for (const f of held) {
+      // The building's other parts near the wall, in the wall's own frame, but for its bars.
+      const into = f.placed.clone().invert()
+      const near = laid[f.wall - open]!.clone().expandByScalar(WALL_WINDOWS.near)
+      const others: THREE.Box3[] = []
+      laid.forEach((b, i) => {
+        if (!b || open + i === f.wall || !b.intersectsBox(near)) return
+        const pos = parts[open + i].geometry.attributes.position
+        const there = new THREE.Box3()
+        for (let k = 0; k < pos.count; k++) there.expandByPoint(v.fromBufferAttribute(pos, k).applyMatrix4(into))
+        const thin = there
+          .getSize(v)
+          .toArray()
+          .filter((size) => size <= WALL_WINDOWS.bar).length
+        if (thin < 2) others.push(there)
+      })
+      const reaches = (o: THREE.Box3, lo: THREE.Vector3, hi: THREE.Vector3) =>
+        Math.min(hi.x, o.max.x) - Math.max(lo.x, o.min.x) > WALL_WINDOWS.touch &&
+        Math.min(hi.y, o.max.y) - Math.max(lo.y, o.min.y) > WALL_WINDOWS.touch &&
+        Math.min(hi.z, o.max.z) - Math.max(lo.z, o.min.z) > WALL_WINDOWS.touch
+      const was = inBlockZoomProps
+      inBlockZoomProps = f.blockZoom
+      for (const [part, faces] of f.windows((lo, hi) => !others.some((o) => reaches(o, lo, hi)))) {
+        const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(faces, 3))
+        geo.computeVertexNormals()
+        push(geo.applyMatrix4(f.placed), windowLook(part, f.look))
+        windowParts.add(parts[parts.length - 1])
+      }
+      inBlockZoomProps = was
+    }
+    held.length = 0
   }
   /**
    * A pool of light on the ground at `(x, y)`, `h` above the road (#174), `w` by `d` and turned `ry`, in the colour and
@@ -755,6 +848,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   /** Close the shapes added since the last brick into one, which lands on `(x, y)`, `h` above the road. */
   const brick = (kind: BrickKind, x: number, y: number, h: number, dust = 0) => {
     if (open === parts.length) return
+    if (held.length) buildWindows()
     for (let i = open; i < parts.length; i++) parts[i].brick = bricks.length
     open = parts.length
     bricks.push(made(kind, new THREE.Vector3(x, h, -y), dust))
@@ -959,6 +1053,12 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   ) => {
     if (!patterned) return add(geo, look, x, y, h, 0, r, tall, r)
     const g = wrap(geo.toNonIndexed(), 2 * Math.PI * r, tall, bay, storey, lit, mulberry32(seed)(), kind)
+    const shape = geo instanceof THREE.CylinderGeometry ? geo.parameters : null
+    if (LOW_POLY && shape && wrapsWindows(kind)) {
+      const [foot, top] = [r * shape.radiusBottom, r * shape.radiusTop]
+      const windows = (clear: Clear) => wrapWindows(foot, top, tall, shape.radialSegments, bay, storey, kind, seed, clear)
+      holdWindows(windows, m.compose(new THREE.Vector3(x, h, -y), q.identity(), new THREE.Vector3(1, 1, 1)), look)
+    }
     push(g.applyMatrix4(m.compose(new THREE.Vector3(x, h, -y), q.identity(), new THREE.Vector3(r, tall, r))), look)
   }
 
@@ -1036,11 +1136,14 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
 
     /**
      * What the kit built since `from` (a `mark`), for the street furniture to keep off (`./kerbside`, #176): its parts'
-     * geometries in place, and the loops of its movers.
+     * geometries in place, but for its walls' windows (#277), and the loops of its movers.
      */
     since(from: { parts: number; movers: number }) {
       return {
-        geometries: parts.slice(from.parts).map((p) => p.geometry),
+        geometries: parts
+          .slice(from.parts)
+          .filter((p) => !windowParts.has(p))
+          .map((p) => p.geometry),
         loops: movers.slice(from.movers).map(({ kind, loop }) => ({ kind, loop })),
       }
     },
