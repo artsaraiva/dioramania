@@ -1,13 +1,16 @@
 // Frame time with 1,000 cars, draw calls and triangles, each Zone all over the 26-Tile City: the working tree against a
-// git ref, interleaved round by round so that whatever else is drawing on the GPU lands on both alike.
+// git ref, or against itself without a dev parameter, interleaved round by round so that whatever else is drawing on the
+// GPU lands on both alike.
 //
-// Usage: npm run bench:visual -- <zones | unzoned | all> [--against <git ref>] [--stages 3] [--views city] [--times noon]
-//          [--rounds 3] [--query <params>]
+// Usage: npm run bench:visual -- <zones | unzoned | all> [--against <git ref>] [--with <params>] [--stages 3]
+//          [--views city] [--times noon] [--rounds 3] [--query <params>]
 //
 // Prints each bench as it runs, then a Markdown table of medians for the PR. Compare numbers only within one table: the
 // same City reads up to a millisecond apart from one day to the next. --views takes city, City zoom, the whole City in
-// frame, and tile, Tile zoom, one Tile filling the screen (#173); --times takes noon and night. --query adds dev
-// parameters to the game's URL on both sides, such as `finish=none`.
+// frame, tile, Tile zoom, one Tile filling the screen (#173), and block, Block zoom, one Block; --times takes noon and
+// night. --query adds dev parameters to the game's URL on both sides, such as `finish=none`. --with adds them to the
+// working tree's side alone, and with no --against benches the working tree against itself without them: `--with
+// look=lowpoly` is what the low-poly look costs (#280).
 import { parseArgs } from 'node:util'
 import { buildCity, DEFAULT_POINTS, frameAll, launch, lookAt, METRES, open, stageAll, zoneNames, zonesFrom } from './city.mjs'
 import { closeAll, serve } from './serve.mjs'
@@ -16,6 +19,7 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     against: { type: 'string' },
+    with: { type: 'string' },
     stages: { type: 'string', default: '3' },
     views: { type: 'string', default: 'city' },
     times: { type: 'string', default: 'noon' },
@@ -26,12 +30,20 @@ const { values, positionals } = parseArgs({
 const stages = values.stages.split(',').map(Number)
 const rounds = Number(values.rounds)
 const views = values.views.split(',')
-if (views.some((v) => !['city', 'tile'].includes(v))) throw new Error('--views takes city and tile')
+// Tile zoom, one Tile filling the screen, and Block zoom, one Block, where `npm run shots` frames them by default.
+const ZOOMS = {
+  tile: { ...DEFAULT_POINTS.tile[0], metres: METRES.tile },
+  block: { ...DEFAULT_POINTS.block[0], metres: METRES.block },
+}
+if (views.some((v) => v !== 'city' && !(v in ZOOMS))) throw new Error('--views takes city, tile and block')
 const DAY = { noon: 0.25, night: 0.75 }
 const times = values.times.split(',')
 if (times.some((t) => !(t in DAY))) throw new Error('--times takes noon and night')
-// Tile zoom: one Tile filling the screen, as `npm run shots` frames it.
-const TILE_ZOOM = { ...DEFAULT_POINTS.tile[0], metres: METRES.tile }
+const withQuery = (extra) =>
+  [values.query, extra]
+    .map((q) => q?.replace(/^[?&]/, ''))
+    .filter(Boolean)
+    .join('&')
 
 /**
  * In the page, after the camera is placed: one frame's draw calls and triangles at the time of day `day`, then the ms per
@@ -92,33 +104,43 @@ const mega = (n) => (n / 1e6).toFixed(2)
 
 const here = await serve()
 const against = values.against && (await serve(values.against))
-const servers = against ? [against, here] : [here]
+// Each side benched: a server, the dev parameters its pages open with, its name in the log and its column in the table.
+const thisBranch = {
+  server: here,
+  query: withQuery(values.with),
+  label: `${here.label}${values.with ? ` with ${values.with}` : ''}`,
+  column: against ? `This branch${values.with ? `, \`${values.with}\`` : ''}` : `With \`${values.with}\``,
+}
+const reference = against
+  ? { server: against, query: withQuery(), label: against.label, column: `\`${values.against}\`` }
+  : values.with && { server: here, query: withQuery(), label: `${here.label} without ${values.with}`, column: 'Without' }
+const sides = reference ? [reference, thisBranch] : [thisBranch]
 const { browser, context } = await launch()
 try {
   const zones = await zonesFrom(positionals, here)
   const names = await zoneNames(here)
-  console.log(`Benching the ${servers.map((s) => s.label).join(' against ')}, ${rounds} rounds.`)
+  console.log(`Benching the ${sides.map((s) => s.label).join(' against the ')}, ${rounds} rounds.`)
   console.log("Close other browsers drawing on this GPU first (the desktop app's Browser pane, WebGL in Chrome).\n")
-  // `${zone} ${stage}` → each server's ms per round, with its draw calls and triangles.
+  // `${zone} ${stage} ${view} ${time}` → each side's ms per round, with its draw calls and triangles.
   const results = new Map()
   for (let round = 0; round < rounds; round++) {
     for (const zone of zones) {
-      for (const server of round % 2 ? [...servers].reverse() : servers) {
-        const page = await open(context, server.url, values.query)
+      for (const side of round % 2 ? [...sides].reverse() : sides) {
+        const page = await open(context, side.server.url, side.query)
         await buildCity(page, zone)
         for (const stage of stages) {
           await stageAll(page, stage)
           for (const view of views) {
-            await (view === 'tile' ? page.evaluate(lookAt, TILE_ZOOM) : page.evaluate(frameAll))
+            await (view === 'city' ? page.evaluate(frameAll) : page.evaluate(lookAt, ZOOMS[view]))
             for (const time of times) {
               const r = await page.evaluate(measure, DAY[time])
               const key = `${zone} ${stage} ${view} ${time}`
               const row = results.get(key) ?? new Map()
               results.set(key, row)
-              if (!row.has(server)) row.set(server, { ms: [], calls: r.calls, triangles: r.triangles })
-              row.get(server).ms.push(r.ms)
+              if (!row.has(side)) row.set(side, { ms: [], calls: r.calls, triangles: r.triangles })
+              row.get(side).ms.push(r.ms)
               console.log(
-                `round ${round + 1}  ${zone} Stage ${stage} ${view} ${time}  ${server.label}: ${ms(r.ms)}, ${r.calls} calls, ` +
+                `round ${round + 1}  ${zone} Stage ${stage} ${view} ${time}  ${side.label}: ${ms(r.ms)}, ${r.calls} calls, ` +
                   `${mega(r.triangles)} M triangles`,
               )
             }
@@ -129,20 +151,20 @@ try {
     }
   }
 
-  const table = against
+  const table = reference
     ? [
-        `| Zone | Stage | View | Time | \`${values.against}\` | This branch | Change | Draw calls | Triangles |`,
+        `| Zone | Stage | View | Time | ${reference.column} | ${thisBranch.column} | Change | Draw calls | Triangles |`,
         '| --- | ---: | --- | --- | ---: | ---: | ---: | --- | --- |',
       ]
     : ['| Zone | Stage | View | Time | Frame time | Draw calls | Triangles |', '| --- | ---: | --- | --- | ---: | ---: | ---: |']
   const noisy = []
   for (const [key, row] of results) {
     const [zone, stage, view, time] = key.split(' ')
-    const [a, b] = servers.map((s) => row.get(s))
-    for (const [server, r] of row) {
+    const [a, b] = sides.map((s) => row.get(s))
+    for (const [side, r] of row) {
       const [lo, hi] = [Math.min(...r.ms), Math.max(...r.ms)]
       if (hi - lo > 0.25 * median(r.ms))
-        noisy.push(`${names[zone]} at Stage ${stage}, ${view} at ${time}, on the ${server.label} read ${lo.toFixed(2)}–${ms(hi)}`)
+        noisy.push(`${names[zone]} at Stage ${stage}, ${view} at ${time}, on the ${side.label} read ${lo.toFixed(2)}–${ms(hi)}`)
     }
     const lead = `| ${names[zone]} | ${stage} | ${view} | ${time}`
     if (!b) {
