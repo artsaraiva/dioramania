@@ -6,6 +6,7 @@ import type { Junction } from '../sim/network'
 import type { Sim, Vehicle } from '../sim/sim'
 import { createCamera, type ScreenPoint } from './camera'
 import { carCentre, createCars } from './cars'
+import { createBlend } from './blend'
 import { createDay } from './day'
 import { createJamEmotion } from './emotion'
 import { createField } from './field'
@@ -233,7 +234,15 @@ export function createView(
     ;[width, height] = [canvas.clientWidth, canvas.clientHeight]
     renderer.setSize(width, height, false)
     rig.resize(width, height)
+    blend?.setSize(width, height)
   }
+  // Low poly (`./look`), the scene is drawn through the blend; the screen's own pieces are drawn over it, out of its lens.
+  const blend = LOW_POLY
+    ? createBlend(renderer, scene, rig.camera, {
+        screen: [emotion.group, tools.group, route.group, hand.group, rezoning.group],
+        lights: day.lights.filter((o) => o instanceof THREE.Light),
+      })
+    : null
   window.addEventListener('resize', fitCanvas)
   fitCanvas()
 
@@ -354,6 +363,7 @@ export function createView(
     /** Let go of the canvas and of everything drawn on it, for a view that is done with, as the title's when a run opens. */
     dispose() {
       window.removeEventListener('resize', fitCanvas)
+      blend?.dispose()
       labels.remove()
       renderer.dispose()
       renderer.forceContextLoss()
@@ -619,7 +629,8 @@ export function createView(
       rig.update(real)
       under.update(dt)
       sky.update(dt, rig.camera.zoom, calm)
-      renderer.render(scene, rig.camera)
+      if (blend) blend.render(day.sky, glow.lamps)
+      else renderer.render(scene, rig.camera)
       labels.update(width, height)
     },
   }

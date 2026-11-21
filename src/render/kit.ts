@@ -12,6 +12,8 @@ import { clad, createPatterns, pave, PATTERN, tile, wrap, type Cladding, type Pa
 import { canvasTexture, gable, hip, nudge, roughBall, roundedBox, tint } from './shapes'
 
 const TAU = Math.PI * 2
+// Low poly, lit windows and lamps are about a quarter dimmer, under the blend's glow (`./blend`, #283).
+const DIM = LOW_POLY ? 0.75 : 1
 // The palette is the oversaturated one picked in #104 at its gentlest strength. Within 30° of hue of the Tool blue or
 // the Jam red-orange, a colour keeps under 65% of that colour's chroma, which is why the terracotta roof is a darker
 // brick, the salmon one persimmon and the slate one a teal slate.
@@ -567,8 +569,8 @@ if (blockZoomFade < 1.0 && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.
     finish,
     /** Light the windows and lamps as the time of day has them. */
     setGlow({ windows, lamps }: Glow) {
-      glass.emissiveIntensity = windows
-      bulb.emissiveIntensity = lamps
+      glass.emissiveIntensity = DIM * windows
+      bulb.emissiveIntensity = DIM * lamps
       patterns?.setGlow(windows)
     },
     /**
