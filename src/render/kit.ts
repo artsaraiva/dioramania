@@ -947,7 +947,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
    * its Stage (in a Stage-up, what goes never stands with what comes), in the order its walls were built, each one built
    * in the way of the next:
    * - A flower box keeps off every part but its wall and that wall's windows, and where it hangs low enough to walk
-   *   into, off the ground claimed; its sill stands in for one that finds no room.
+   *   into, off what stands under it and the ground claimed; its sill stands in for one that finds no room.
    * - A pot keeps off every part but its wall, off the ground claimed but for its own building's, off the movers' ways
    *   and the Walkers' (`PLANTING.walk`), and stands on something at its foot.
    * Leaves and pots are Block-zoom props, as the kit's pot plants are; a flower box's planter is drawn at every zoom, as
@@ -1063,8 +1063,10 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       for (const [n, p] of f.plantings.entries()) {
         const pot = p.kind === 'pot'
         const [cx, cz] = [(p.lo.x + p.hi.x) / 2, (p.lo.z + p.hi.z) / 2]
-        // What a pot stands on may rise a little into its foot.
-        const lo = pot ? p.lo.clone().setY(p.lo.y + PLANTING.sink) : p.lo
+        // What a pot stands on may rise a little into its foot; a flower box low enough to walk into keeps off what
+        // stands under it too, as a porch's pots.
+        const low = p.lo.y - wall.min.y < PLANTING.low
+        const lo = pot ? p.lo.clone().setY(p.lo.y + PLANTING.sink) : low ? p.lo.clone().setY(wall.min.y) : p.lo
         const clear = near.every((o) => !meets(o.box, lo, p.hi) || !meets(exactly(o), lo, p.hi))
         const standsOn = (o: THREE.Box3) =>
           o.min.x <= cx && cx <= o.max.x && o.min.z <= cz && cz <= o.max.z && Math.abs(o.max.y - p.lo.y) <= PLANTING.sink
