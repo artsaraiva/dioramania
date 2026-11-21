@@ -2,7 +2,6 @@ import * as THREE from 'three'
 import type { Bounds } from '../sim/geometry'
 import { centre } from './slab'
 
-export const DAY = 180 // real seconds per day
 /**
  * The working day, as the day's clock reads (0–1): moving details set out at `from` and stop work at `to` (#149), and
  * flags fly between them (#154).
@@ -10,7 +9,6 @@ export const DAY = 180 // real seconds per day
 export const WORK = { from: 0.02, to: 0.5 }
 /** The light wind (m/s, east and north) that leans the chimneys' smoke (#150) and flies the flags (#154). */
 export const WIND = { x: 0.55, y: 0.35 }
-const START = 0 // the day opens in the morning
 const LIGHT_DISTANCE = 500 // m from the slab's centre to the light, at least
 const MIN_REACH = 250 // m: the shadow map never covers less than this either side of the slab's centre
 // m, m and texels, for a shadow map `MIN_REACH` either side. The blur is one texel, so a shadow's edge is crisp (#148).
@@ -66,9 +64,9 @@ export interface Glow {
 }
 
 /**
- * The day cycle: morning, noon, dusk and night on a looping clock of its own. It moves one directional light (with a
- * soft shadow map covering the slab), a hemisphere light and the sky gradient behind the transparent canvas, and says
- * what glows. It is cosmetic: nothing in the sim reads it.
+ * The day cycle: morning, noon, dusk and night, shown at the time of day the Sim's clock reads (#309). It moves one
+ * directional light (with a soft shadow map covering the slab), a hemisphere light and the sky gradient behind the
+ * transparent canvas, and says what glows.
  * ponytail: one shadow map covers the whole slab, so its shadows soften as the City grows: a texel is 12 cm up to 3
  * cells across and half a metre at 12. Cascade the shadow map on the camera's view if a large City's shadows look
  * too soft.
@@ -100,7 +98,7 @@ export function createDay(canvas: HTMLCanvasElement, slab: Bounds) {
   }
   fit(slab)
 
-  let clock = START
+  let clock = 0 // the time of day shown
   let held = false // stopped by `hold`
   let sky = ''
   const mixed = new THREE.Color()
@@ -147,15 +145,15 @@ export function createDay(canvas: HTMLCanvasElement, slab: Bounds) {
       return clock
     },
 
-    /** Move the clock on by `dt` real seconds and show the time it reaches. */
-    update(dt: number): Glow {
-      if (!held) clock = (clock + dt / DAY) % 1
+    /** Show the time of day `time`, 0–1, as the Sim's clock reads it: the time held instead, once one is. */
+    update(time: number): Glow {
+      if (!held) clock = time
       return show(clock)
     },
 
     /**
-     * Stop the clock at a time of day, 0–1 (0 morning, 0.25 noon, 0.5 dusk, 0.75 night). For looking at one light while
-     * building the game: the player has no control over the time of day.
+     * Show a time of day from now on, 0–1 (0 morning, 0.25 noon, 0.5 dusk, 0.75 night), whatever the Sim's clock reads.
+     * For looking at one light while building the game: the player has no control over the time of day.
      */
     hold(p: number) {
       held = true
