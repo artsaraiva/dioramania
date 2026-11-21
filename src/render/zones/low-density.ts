@@ -7,7 +7,7 @@ import { AERIAL, CREAM, FLAG, FRONTAGE, type Gap, GARDEN, HOME, type Kit, LEAVES
 import { PATTERN } from '../pattern'
 import { bench, gardenShed, stoneLantern } from '../props'
 import type { Footprint } from '../kerbside'
-import { corners, distance, fit, lotsOf, turned, type Look, type RowLot, type ZoneGround } from './ground'
+import { corners, distance, fit, lotsOf, onDrive, turned, type Look, type RowLot, type ZoneGround } from './ground'
 import { beside, kerbAhead, placeScenes, sceneOrder, type Scene } from './scenes'
 import { gable } from '../shapes'
 
@@ -89,9 +89,22 @@ function houses(g: ZoneGround) {
   const { kit, block } = g
   const ground = KERB + 0.16 // on the lawn
   const lots = lotsOf(g, HOUSES.margin, HOUSES.lot)
+  // Each lot's lawn as if the Block had no Drive: a lawn on the Drive is drawn as it was and left empty (#327), so that
+  // no other lot changes.
+  const withoutDrive = { ...g, drive: undefined }
   const lawns = lots.map((lot): Lawn | null => {
     const [x, y] = [(lot.x0 + lot.x1) / 2, (lot.y0 + lot.y1) / 2]
-    const lawn = fit(g, x, y, lot.x1 - lot.x0 - 2 * HOUSES.gap, lot.y1 - lot.y0 - 2 * HOUSES.gap, HOUSES.clear, HOUSES.least, 1.6, 3)
+    const lawn = fit(
+      withoutDrive,
+      x,
+      y,
+      lot.x1 - lot.x0 - 2 * HOUSES.gap,
+      lot.y1 - lot.y0 - 2 * HOUSES.gap,
+      HOUSES.clear,
+      HOUSES.least,
+      1.6,
+      3,
+    )
     return lawn && { x, y, ...lawn }
   })
   const centre = middle(block)
@@ -106,95 +119,99 @@ function houses(g: ZoneGround) {
       continue
     }
     const { x, y, w, d } = lawn
-    kit.lot(i, lot)
-    kit.from(1, () => {
-      kit.lawn(x, y, KERB, w, d)
-      kit.brick('ground', x, y, KERB)
-    })
-    const tree = kit.chance(0.1)
-    const scene = sceneOn.get(i)
-    if (scene || tree) roofs.push(null)
-    if (scene) {
-      for (let k = tree ? 1 : 6; k > 0; k--) kit.range(0, 1) // the draws its tree or house took, so every lot after keeps its draws
-      const { kind, ground: l, from } = scene
-      kit.scene(kind, () => kit.staged((stage) => lowScene(kit, kind, l, stage, from), spot(l.x, l.y)))
-      frontage(kit, l, ground, 0, wallRuns(l.w / 2, 0, null))
-      continue
-    }
-    if (tree) {
-      kit.staged((stage) => kit.tree(x, y, ground, SAPLING[stage - 1] * kit.range(0.7, 0.95), 'round', kit.finished))
-      const l = groundOf(g, lawn)
-      if (kit.finished) frontage(kit, l, ground, 0, wallRuns(l.w / 2, 0, null))
-      continue
-    }
-    const home = homeOf(g, x, y, w, d)
-    const plan = kit.finished ? housePlan(lots, i, home.front, roofs, plans) : undefined
-    roofs.push(plan?.roof ?? null)
-    kit.staged((stage) =>
-      house(kit, home.x, home.y, ground, home.w, home.d, stage, { front: home.front, solar: stage >= home.solar, plan }),
-    )
-    const [sx, sy] = [kit.chance(0.5) ? 1 : -1, kit.chance(0.5) ? 1 : -1]
-    // The seeds of the garden's trees, drawn as `kit.from` draws them, so that where each stands is known at every Stage.
-    const seeds = [kit.range(0, 1), kit.range(0, 1)].map((r) => (r * 4294967296) >>> 0)
-    // A garden tree keeps off the house, its drive and the laundry pole on it; where the garden is finished, it stands
-    // in the corner it always took if the ground there is clear of the house, the hedge and the rest by 1.3 m, or else
-    // in the clear ground nearest it.
-    const plot = kit.finished ? plotOf(kit, home, lawn) : null
-    // Where the garden is finished, it is laid out before the trees and the hedge, which opens where what it holds
-    // stands at its edge: each piece it holds claims its ground from the Stage it stands at, and is kept for the hedge.
-    const held: Patch[] = []
-    const hold = (p: Patch, from: number) => {
-      plot?.stand(p, from)
-      held.push(p)
-    }
-    const layout = plot && gardenOf(lawn, plot, hold)
-    const { pad, pole } = home
-    const free = (px: number, py: number) => {
-      if (home.car < 4 && px > pad.x0 - 1.2 && px < pad.x1 + 1.2 && py > pad.y0 - 1.2 && py < pad.y1 + 1.2) return false
-      if (!pole || home.laundry > 3) return true
-      const [a, b] = [turned(pole.x, pole.y, pole.ry, -pole.len / 2, 0), turned(pole.x, pole.y, pole.ry, pole.len / 2, 0)]
-      return distance({ x: px, y: py }, a, b) > 1.4
-    }
-    const corners = [
-      { x: x + sx * (w / 2 - 1.4), y: y + sy * (d / 2 - 1.4) },
-      { x: x - sx * (w / 2 - 1.4), y: y - sy * (d / 2 - 1.4) },
-    ]
-    const trees = corners.map((c, k) => {
-      if (mulberry32(seeds[k])() >= [0.6, 0.5][k]) return null // as the tree's own stream first draws
-      if (!plot) return free(c.x, c.y) ? c : null
-      const [cu, cv] = plot.local(c.x, c.y)
-      const near = plot.clear(c.x, c.y, 0.6, 0.6, 0.45) ? c : ((s) => s && plot.at(s.u, s.v))(spotIn(plot, 0.6, 0.6, 0.45, cu, cv))
-      if (near) hold(plot.around(near.x, near.y, 0.7), [2, 3][k]) // from the Stage each tree comes at, as below
-      return near
-    })
-    kit.from(
-      2,
-      () => {
-        const t = trees[0]
-        if (kit.chance(0.6) && t) kit.tree(t.x, t.y, ground, kit.range(0.45, 0.65), kit.chance(0.2) ? 'sakura' : 'round', kit.finished)
-      },
-      seeds[0],
-    )
-    kit.from(
-      3,
-      () => {
-        const t = trees[1]
-        if (kit.chance(0.5) && t) kit.tree(t.x, t.y, ground, kit.range(0.4, 0.55), kit.chance(0.3) ? 'sakura' : 'round', kit.finished)
-      },
-      seeds[1],
-    )
-    // The hedge opens on the front, at the door and at the drive; where the garden is finished, a low wall runs along
-    // the front instead, and the hedge opens along the drive and wherever the garden's trees, shed, patch or pole stand
-    // at its edge.
-    const along = (px: number, py: number) => (home.front % 2 ? px - x : py - y)
-    const gaps = plot ? plot.gaps(home, held) : [{ side: home.front, at: along(home.x, home.y), wide: 2.4 }]
-    if (home.car < 4 && !plot) {
-      const wide = home.front % 2 ? pad.x1 - pad.x0 : pad.y1 - pad.y0
-      gaps.push({ side: home.front, at: along((pad.x0 + pad.x1) / 2, (pad.y0 + pad.y1) / 2), wide: wide + 0.3 })
-    }
-    kit.from(3, () => kit.hedge(x, y, ground, w, d, gaps))
-    homeDetails(kit, home, ground)
-    if (plot && layout) garden(kit, home, lawn, plot, layout, ground)
+    // A lawn on the Drive (#327) is drawn as it was and left empty, so that no other lot changes.
+    const empty = onDrive(g, { ...lawn, ry: 0 })
+    kit.muted(() => {
+      kit.lot(i, lot)
+      kit.from(1, () => {
+        kit.lawn(x, y, KERB, w, d)
+        kit.brick('ground', x, y, KERB)
+      })
+      const tree = kit.chance(0.1)
+      const scene = sceneOn.get(i)
+      if (scene || tree) roofs.push(null)
+      if (scene) {
+        for (let k = tree ? 1 : 6; k > 0; k--) kit.range(0, 1) // the draws its tree or house took, so every lot after keeps its draws
+        const { kind, ground: l, from } = scene
+        kit.scene(kind, () => kit.staged((stage) => lowScene(kit, kind, l, stage, from), spot(l.x, l.y)))
+        frontage(kit, l, ground, 0, wallRuns(l.w / 2, 0, null))
+        return
+      }
+      if (tree) {
+        kit.staged((stage) => kit.tree(x, y, ground, SAPLING[stage - 1] * kit.range(0.7, 0.95), 'round', kit.finished))
+        const l = groundOf(g, lawn)
+        if (kit.finished) frontage(kit, l, ground, 0, wallRuns(l.w / 2, 0, null))
+        return
+      }
+      const home = homeOf(g, x, y, w, d)
+      const plan = kit.finished ? housePlan(lots, i, home.front, roofs, plans) : undefined
+      roofs.push(plan?.roof ?? null)
+      kit.staged((stage) =>
+        house(kit, home.x, home.y, ground, home.w, home.d, stage, { front: home.front, solar: stage >= home.solar, plan }),
+      )
+      const [sx, sy] = [kit.chance(0.5) ? 1 : -1, kit.chance(0.5) ? 1 : -1]
+      // The seeds of the garden's trees, drawn as `kit.from` draws them, so that where each stands is known at every Stage.
+      const seeds = [kit.range(0, 1), kit.range(0, 1)].map((r) => (r * 4294967296) >>> 0)
+      // A garden tree keeps off the house, its drive and the laundry pole on it; where the garden is finished, it stands
+      // in the corner it always took if the ground there is clear of the house, the hedge and the rest by 1.3 m, or else
+      // in the clear ground nearest it.
+      const plot = kit.finished ? plotOf(kit, home, lawn) : null
+      // Where the garden is finished, it is laid out before the trees and the hedge, which opens where what it holds
+      // stands at its edge: each piece it holds claims its ground from the Stage it stands at, and is kept for the hedge.
+      const held: Patch[] = []
+      const hold = (p: Patch, from: number) => {
+        plot?.stand(p, from)
+        held.push(p)
+      }
+      const layout = plot && gardenOf(lawn, plot, hold)
+      const { pad, pole } = home
+      const free = (px: number, py: number) => {
+        if (home.car < 4 && px > pad.x0 - 1.2 && px < pad.x1 + 1.2 && py > pad.y0 - 1.2 && py < pad.y1 + 1.2) return false
+        if (!pole || home.laundry > 3) return true
+        const [a, b] = [turned(pole.x, pole.y, pole.ry, -pole.len / 2, 0), turned(pole.x, pole.y, pole.ry, pole.len / 2, 0)]
+        return distance({ x: px, y: py }, a, b) > 1.4
+      }
+      const corners = [
+        { x: x + sx * (w / 2 - 1.4), y: y + sy * (d / 2 - 1.4) },
+        { x: x - sx * (w / 2 - 1.4), y: y - sy * (d / 2 - 1.4) },
+      ]
+      const trees = corners.map((c, k) => {
+        if (mulberry32(seeds[k])() >= [0.6, 0.5][k]) return null // as the tree's own stream first draws
+        if (!plot) return free(c.x, c.y) ? c : null
+        const [cu, cv] = plot.local(c.x, c.y)
+        const near = plot.clear(c.x, c.y, 0.6, 0.6, 0.45) ? c : ((s) => s && plot.at(s.u, s.v))(spotIn(plot, 0.6, 0.6, 0.45, cu, cv))
+        if (near) hold(plot.around(near.x, near.y, 0.7), [2, 3][k]) // from the Stage each tree comes at, as below
+        return near
+      })
+      kit.from(
+        2,
+        () => {
+          const t = trees[0]
+          if (kit.chance(0.6) && t) kit.tree(t.x, t.y, ground, kit.range(0.45, 0.65), kit.chance(0.2) ? 'sakura' : 'round', kit.finished)
+        },
+        seeds[0],
+      )
+      kit.from(
+        3,
+        () => {
+          const t = trees[1]
+          if (kit.chance(0.5) && t) kit.tree(t.x, t.y, ground, kit.range(0.4, 0.55), kit.chance(0.3) ? 'sakura' : 'round', kit.finished)
+        },
+        seeds[1],
+      )
+      // The hedge opens on the front, at the door and at the drive; where the garden is finished, a low wall runs along
+      // the front instead, and the hedge opens along the drive and wherever the garden's trees, shed, patch or pole stand
+      // at its edge.
+      const along = (px: number, py: number) => (home.front % 2 ? px - x : py - y)
+      const gaps = plot ? plot.gaps(home, held) : [{ side: home.front, at: along(home.x, home.y), wide: 2.4 }]
+      if (home.car < 4 && !plot) {
+        const wide = home.front % 2 ? pad.x1 - pad.x0 : pad.y1 - pad.y0
+        gaps.push({ side: home.front, at: along((pad.x0 + pad.x1) / 2, (pad.y0 + pad.y1) / 2), wide: wide + 0.3 })
+      }
+      kit.from(3, () => kit.hedge(x, y, ground, w, d, gaps))
+      homeDetails(kit, home, ground)
+      if (plot && layout) garden(kit, home, lawn, plot, layout, ground)
+    }, empty)
   }
   kit.lot(-1)
 }
@@ -502,7 +519,7 @@ function plotOf(kit: Kit, home: Home, lawn: Lawn): Plot {
     stand,
     claimed: () =>
       kit.claimed().map((c) => {
-        const uv = corners({ ...c, onRoad: false }, 0).map((q) => local(q.x, q.y))
+        const uv = corners(c, 0).map((q) => local(q.x, q.y))
         const [us, vs] = [uv.map(([u]) => u), uv.map(([, v]) => v)]
         return { u0: Math.min(...us), u1: Math.max(...us), v0: Math.min(...vs), v1: Math.max(...vs) }
       }),
@@ -798,7 +815,7 @@ function lowScenes(g: ZoneGround, lots: Bounds[], lawns: (Lawn | null)[], draw: 
       const road = n < lots.length
       const i = (Math.floor(start * lots.length) + n) % lots.length
       const lawn = lawns[i]
-      if (!lawn || Math.min(lawn.w, lawn.d) < LOW_SCENES[kind]) continue
+      if (!lawn || Math.min(lawn.w, lawn.d) < LOW_SCENES[kind] || onDrive(g, { ...lawn, ry: 0 })) continue // none on the Drive (#327)
       if (out.some((o) => o.lot === i || beside(lots[o.lot], lots[i]))) continue
       const ground = groundOf(g, lawn)
       if (road && kerbAhead(g, ground, 0) === null) continue

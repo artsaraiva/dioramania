@@ -112,7 +112,7 @@ function together(a: Thing, b: Thing): boolean {
 
 /**
  * Nothing overlaps what it should keep clear of (#173): no standing thing stands on a parking or taxi bay but a parked
- * car, or on the step before a door but its own building; and no two standing things overlap, scenes, utility poles,
+ * car, on the step before a door but its own building, or in a Drive but its gate (#327); and no two standing things overlap, scenes, utility poles,
  * lamps and street trees among them, unless they are one scene's. The ground a piece stands on (#198) is held to account
  * as the piece itself is, by the pairs.
  */
@@ -122,7 +122,7 @@ export const keepsClear: Rule = (r) => {
   for (const c of r.claims.filter((c) => c.kind !== 'stand')) {
     const claim = { feet: [c.hull], box: boxOfHull(c.hull) }
     for (const t of standers) {
-      if (t.id === c.thing || (c.kind !== 'door' && PARKED.has(t.what))) continue
+      if (t.id === c.thing || ((c.kind === 'bay' || c.kind === 'taxi') && PARKED.has(t.what))) continue
       if (c.block >= 0 && t.block >= 0 && t.block !== c.block) continue
       const d = depth(claim, t)
       if (d > TOLERANCE) out.push(fail('keeps-clear', r, c, `${t.what} on a ${claimName(c)}`, m(d)))
@@ -136,7 +136,8 @@ export const keepsClear: Rule = (r) => {
   return out
 }
 
-const claimName = (c: Claim) => ({ bay: 'parking bay', taxi: 'taxi bay', door: 'door step', stand: "piece's ground" })[c.kind]
+const claimName = (c: Claim) =>
+  ({ bay: 'parking bay', taxi: 'taxi bay', door: 'door step', drive: 'Drive', stand: "piece's ground" })[c.kind]
 const boxOfHull = (h: Hull): Box => ({
   x0: Math.min(...h.map((p) => p.x)),
   y0: Math.min(...h.map((p) => p.y)),
@@ -359,7 +360,7 @@ const budget =
 /**
  * No 12 m of pavement stands empty (rule 3): walking each Block's kerb where it faces a Road a metre at a time, something
  * standing (any layer, a wall too) within `EMPTY.band` m of the kerb, or a utility pole or lamp beside it. A taxi or a
- * parking bay laid at the kerb is no pavement, a lay-by off the Road, and breaks the run (#193). Approximation: only
+ * parking bay laid at the kerb is no pavement, a lay-by off the Road, and breaks the run (#193), as a Drive does (#327). Approximation: only
  * what stands counts, so paving or a planted bed alone leaves the pavement empty, as a bare run of joints is.
  */
 export const emptyPavement: Rule = (r) => {
@@ -369,7 +370,7 @@ export const emptyPavement: Rule = (r) => {
     if (!filled(r, i)) return
     const near = standers.filter((t) => t.block === i || t.block < 0)
     const bays = r.claims
-      .filter((c) => c.block === i && (c.kind === 'bay' || c.kind === 'taxi'))
+      .filter((c) => c.block === i && (c.kind === 'bay' || c.kind === 'taxi' || c.kind === 'drive'))
       .map((c) => ({ feet: [c.hull], box: boxOfHull(c.hull) }))
     const runs = b.kerb ?? [along([...b.loop, b.loop[0]], EMPTY.step)]
     let [longest, at]: [number, Pt | null] = [0, null]
@@ -519,6 +520,21 @@ export const blankRoofs: Rule = (r) =>
       return fail('blank-roof', r, t, `${t.what} has a blank roof${round} toward ${pt(middle(f.hull))}`, `${f.seen.toFixed(0)} m² in sight`)
     })
 
+/**
+ * Every Block of a zoned Tile has exactly one Drive (#327), a roundabout's island aside: no vehicle leaves the Ring for
+ * it. A Block filled by a Landmark has one too, and an unzoned Tile's Blocks have none.
+ */
+const drives: Rule = (r) => {
+  const out: Failure[] = []
+  r.blocks.forEach((b, i) => {
+    if (r.things.some((t) => t.block === i && t.what === 'island')) return
+    const count = r.claims.filter((c) => c.block === i && c.kind === 'drive').length
+    const want = b.zone ? 1 : 0
+    if (count !== want) out.push(fail('drives', r, { tile: b.tile, block: i }, `${count} Drives on a Block that wants ${want}`, `${count}`))
+  })
+  return out
+}
+
 /** Every rule over one report, by name. */
 export function rules(ceilings: Record<string, { triangles: number; meshes: number }>): Record<string, Rule> {
   return {
@@ -534,6 +550,7 @@ export function rules(ceilings: Record<string, { triangles: number; meshes: numb
     'empty-pavement': emptyPavement,
     pools,
     'block-zoom': blockZoomProps,
+    drives,
     colours,
     budget: budget(ceilings),
   }
@@ -559,6 +576,26 @@ export function sameLots(reports: Report[]): Failure[] {
         const moved = Math.max(...lot.ground!.map((p, k) => Math.hypot(p.x - other.ground![k].x, p.y - other.ground![k].y)))
         if (o > s && moved > TOLERANCE)
           out.push(fail('same-lots', r, lot, `lot ${lot.index} lies elsewhere at Stage ${reports[o].stage}`, m(moved)))
+      }
+    }
+  })
+  return out
+}
+
+/**
+ * A Drive lies in the same place at every Stage (#327): each Block's Drive at one Stage is on the same ground at every
+ * other. Over the reports of one Zone and seed at each Stage, whose Blocks are the same Blocks in the same order.
+ */
+export function sameDrives(reports: Report[]): Failure[] {
+  const out: Failure[] = []
+  const byStage = reports.map((r) => new Map(r.claims.filter((c) => c.kind === 'drive').map((c) => [c.block, c])))
+  reports.forEach((r, s) => {
+    for (const [block, drive] of byStage[s]) {
+      for (let o = s + 1; o < reports.length; o++) {
+        const other = byStage[o].get(block)
+        const moved = other ? Math.max(...drive.hull.map((p, k) => Math.hypot(p.x - other.hull[k].x, p.y - other.hull[k].y))) : Infinity
+        if (moved > TOLERANCE)
+          out.push(fail('same-drives', r, drive, `the Drive lies elsewhere at Stage ${reports[o].stage}`, other ? m(moved) : 'none'))
       }
     }
   })

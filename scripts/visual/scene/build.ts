@@ -58,6 +58,7 @@ const PLUMBING = new Set([
   'furniture',
   'scene',
   'cladded',
+  'muted',
 ])
 /**
  * The Zones' buildings and the props one Zone lays, beside their fills in `src/render/zones` since #207 and #210, which

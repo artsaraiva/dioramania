@@ -7,7 +7,7 @@ import { buildReport, type Drop } from './build'
 import { boxOf } from './geometry'
 import { CEILINGS, knownOf } from './known'
 import type { Box, Failure, Report } from './report'
-import { rules, sameLots } from './rules'
+import { rules, sameDrives, sameLots } from './rules'
 
 /** What `npm run check:scene` was asked: see the usage at the head of `../check.mjs`. */
 export interface Options {
@@ -131,7 +131,7 @@ export async function main(o: Options): Promise<number> {
         bySeed.push(r)
         for (const rule of Object.values(checks)) failures.push(...rule(r))
       }
-      failures.push(...sameLots(bySeed))
+      failures.push(...sameLots(bySeed), ...sameDrives(bySeed))
       reports.push(...bySeed)
     }
     const seconds = (performance.now() - t0) / 1000
@@ -139,7 +139,7 @@ export async function main(o: Options): Promise<number> {
     console.log(
       `\n${zone}: stages ${o.stages.join(',')} × ${seeds.length} seed${seeds.length > 1 ? 's' : ''}, ${seconds.toFixed(1)} s (${builds.toFixed(1)} s a City built, ${(seconds / reports.length).toFixed(1)} s checked)`,
     )
-    for (const name of [...Object.keys(checks), 'same-lots']) {
+    for (const name of [...Object.keys(checks), 'same-lots', 'same-drives']) {
       const mine = failures.filter((f) => f.rule === name)
       const known = mine.filter((f) => knownOf(f))
       const news = mine.filter((f) => !knownOf(f))

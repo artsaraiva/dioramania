@@ -331,12 +331,13 @@ export interface Brick {
 
 /**
  * Ground a fill lays and later pieces must keep clear of (#191), as the scene check reads it: a parking bay, a taxi
- * bay, the step before a door, or what a standing piece stands on with the room it keeps (#198). A box `w` along its
+ * bay, the step before a door, a Block's Drive (`./drive`, #327), or what a standing piece stands on with the room it
+ * keeps (#198). A box `w` along its
  * front by `d`, centred on `(x, y)` (m) and turned `ry` as the kit's frames are, and the brick it was laid with; for a
  * standing piece, the Stage it stands from.
  */
 export interface Claim {
-  kind: 'bay' | 'taxi' | 'door' | 'stand'
+  kind: 'bay' | 'taxi' | 'door' | 'drive' | 'stand'
   x: number
   y: number
   w: number
@@ -346,9 +347,9 @@ export interface Claim {
   from?: number
 }
 
-/** Every kind of claim; and the ground laid to be kept clear, the bays and the door steps, without what stands. */
-const CLAIMS: readonly Claim['kind'][] = ['bay', 'taxi', 'door', 'stand']
-export const BAYS_AND_DOORS: readonly Claim['kind'][] = ['bay', 'taxi', 'door']
+/** Every kind of claim; and the ground laid to be kept clear, the bays, the door steps and the Drive, without what stands. */
+const CLAIMS: readonly Claim['kind'][] = ['bay', 'taxi', 'door', 'drive', 'stand']
+export const KEPT_CLEAR: readonly Claim['kind'][] = ['bay', 'taxi', 'door', 'drive']
 
 /** Ground `w` by `d` at `(x, y)` turned `ry`, as a claim or a question about one has it. */
 type Ground = Pick<Claim, 'x' | 'y' | 'w' | 'd' | 'ry'>
@@ -639,9 +640,10 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   const unclaimed = (x: number, y: number, w: number, d: number, ry = 0, room = 0, of: readonly Claim['kind'][] = CLAIMS) => {
     const mine = { x, y, w, d, ry }
     const grow = w || d ? room : 0 // a point stays one, `room` m from each claim
-    // Apart from a bay or a door step, or within a sliver of it; apart from what stands, both grown `room`.
+    // Apart from a bay or a door step, or within a sliver of it; apart from what stands and from the Drive, both grown `room`.
+    const grown = (c: Claim) => c.kind === 'stand' || c.kind === 'drive'
     return claims.every(
-      (c) => !of.includes(c.kind) || (c.kind === 'stand' ? reach(mine, grow, c, room, false) <= 0 : reach(mine, 0, c, 0, true) <= 0.02),
+      (c) => !of.includes(c.kind) || (grown(c) ? reach(mine, grow, c, room, false) <= 0 : reach(mine, 0, c, 0, true) <= 0.02),
     )
   }
   /** The ground standing pieces claimed on the Block so far, of those standing at Stage `stage`: `kit.claimed`. */
@@ -1127,6 +1129,24 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
     /** Whether what is built from here on is to the Finish (`finish`), as far as the materials allow (#178). */
     get finished() {
       return finished()
+    },
+
+    /**
+     * Build what `fn` builds, and if `when`, keep none of it (#327), as a lot on a Block's Drive is built: it draws from
+     * the kit's stream as it would have, so nothing built after it changes, and the ground it claimed for what stands
+     * stays claimed, so nothing laid after it moves onto that ground; but its shapes, bricks, movers, pools, scenes,
+     * forms and other claims are left out.
+     */
+    muted(fn: () => void, when = true) {
+      if (!when) return fn()
+      const lists = [parts, bricks, movers, plumes, beacons, sways, flags, pools, claims, scenes, forms] as unknown[][]
+      const at = lists.map((l) => l.length)
+      fn()
+      const kept = claims.slice(at[8]).filter((c) => c.kind === 'stand')
+      for (const p of parts.slice(at[0])) p.geometry.dispose()
+      lists.forEach((l, i) => (l.length = at[i]))
+      claims.push(...kept.map((c) => ({ ...c, brick: bricks.length }))) // riding the next brick closed, as they did
+      open = parts.length
     },
 
     /** How much the kit has built so far, to read back what it builds from here on (`since`). */

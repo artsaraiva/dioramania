@@ -2,6 +2,8 @@ import { middle, overlaps, type Bounds, type Vec } from '../../sim/geometry'
 import { cellAt, cellBounds } from '../../sim/tiles'
 import { KERB, twiceArea, type Block } from '../blocks'
 import { inside, type Field } from '../field'
+import type { Drive } from '../drive'
+import type { Footprint } from '../kerbside'
 import { to, type Kit } from '../kit'
 import { GROW } from '../landmarks'
 
@@ -19,6 +21,11 @@ export interface ZoneGround {
   field: Field
   /** Landmarks' ground, which no building may stand on. */
   reserved: Bounds[]
+  /**
+   * The Block's Drive (`../drive`, #327), which nothing may stand on: none on an unzoned Tile. A lot whose building
+   * would stand on it is drawn as it was and left empty (the kit's `muted`), so that no other lot changes with it.
+   */
+  drive?: Drive
   /** The Block's street trees, which buildings keep clear of. */
   kerbsideTrees: Vec[]
   /** The lamps at the Block's corners, which what stands on the ground keeps clear of (#150). */
@@ -81,11 +88,11 @@ export function lotsOf({ kit, block, kerbsideTrees }: ZoneGround, margin: number
 
 /**
  * Whether a footprint `w` by `d` centred on `(x, y)` and turned `ry` (unturned, `w` runs east–west) stands on the Block
- * at least `clear` m in from its edge, off any landmark's ground and clear of the street trees. Its outline is sampled
+ * at least `clear` m in from its edge, off any landmark's ground and the Drive, and clear of the street trees. Its outline is sampled
  * about every 3 m, closer than a Road is wide, so no Road crosses it unseen.
  */
 export function stands(
-  { block, field, reserved, kerbsideTrees }: ZoneGround,
+  { block, field, reserved, drive, kerbsideTrees }: ZoneGround,
   x: number,
   y: number,
   w: number,
@@ -106,6 +113,7 @@ export function stands(
   const [hw, hd] = [(Math.abs(c) * w + Math.abs(s) * d) / 2, (Math.abs(s) * w + Math.abs(c) * d) / 2]
   const box = { x0: x - hw, y0: y - hd, x1: x + hw, y1: y + hd }
   if (reserved.some((r) => overlaps(box, r))) return false
+  if (drive && overlap(drive, { x, y, w, d, ry }, 0)) return false
   return !kerbsideTrees.some(
     (t) => t.x > box.x0 - TREE_ROOM && t.x < box.x1 + TREE_ROOM && t.y > box.y0 - TREE_ROOM && t.y < box.y1 + TREE_ROOM,
   )
@@ -131,8 +139,8 @@ export interface RowLot {
   onRoad: boolean
 }
 
-/** A row lot's corners, `shrink` m in from its outline. */
-export function corners(lot: RowLot, shrink: number): Vec[] {
+/** A row lot's corners, or any footprint's, `shrink` m in from its outline. */
+export function corners(lot: Footprint, shrink: number): Vec[] {
   const [c, s] = [Math.cos(lot.ry), Math.sin(lot.ry)]
   const [hw, hd] = [lot.w / 2 - shrink, lot.d / 2 - shrink]
   return [
@@ -143,8 +151,8 @@ export function corners(lot: RowLot, shrink: number): Vec[] {
   ].map(([u, v]) => ({ x: lot.x + u * c - v * s, y: lot.y + u * s + v * c }))
 }
 
-/** Whether two row lots overlap by more than a sliver (`shrink` m in from each), by their separating axes. */
-export function overlap(a: RowLot, b: RowLot, shrink = 0.15): boolean {
+/** Whether two row lots, or any footprints, overlap by more than a sliver (`shrink` m in from each), by their separating axes. */
+export function overlap(a: Footprint, b: Footprint, shrink = 0.15): boolean {
   const [pa, pb] = [corners(a, shrink), corners(b, shrink)]
   for (const ry of [a.ry, b.ry]) {
     for (const [ax, ay] of [
@@ -158,8 +166,11 @@ export function overlap(a: RowLot, b: RowLot, shrink = 0.15): boolean {
   return true
 }
 
-/** Whether `(x, y)` lies within `pad` m of a row lot. */
-export function near(lot: RowLot, x: number, y: number, pad: number): boolean {
+/** Whether footprint `f`, a lot's or a building's, stands on the Block's Drive (#327). */
+export const onDrive = ({ drive }: ZoneGround, f: Footprint) => !!drive && overlap(drive, f, 0)
+
+/** Whether `(x, y)` lies within `pad` m of a row lot, or any footprint. */
+export function near(lot: Footprint, x: number, y: number, pad: number): boolean {
   const [c, s] = [Math.cos(lot.ry), Math.sin(lot.ry)]
   const [dx, dy] = [x - lot.x, y - lot.y]
   return Math.abs(dx * c + dy * s) < lot.w / 2 + pad && Math.abs(-dx * s + dy * c) < lot.d / 2 + pad
@@ -213,9 +224,11 @@ function sides(loop: Vec[], tolerance: number): Vec[] {
  * Rows of lots along the Block's edge, whatever its shape: their fronts `margin` m in from the edge and facing out,
  * each `width()` wide, and a whole side of a row `depth()` deep. A lot that would overlap one placed already by more
  * than a sliver, or not stand on the Block, is left out, so corners stay open; one that overlaps by a sliver, as at a
- * row's corner, is cut back at an end until it and the step before its front keep clear (`cutBack`, #193).
+ * row's corner, is cut back at an end until it and the step before its front keep clear (`cutBack`, #193). A lot on
+ * the Drive is kept: its Zone draws it and leaves it empty (`onDrive`), so that the lots after it keep their draws.
  */
-export function rows(g: ZoneGround, margin: number, depth: () => number, width: () => number): RowLot[] {
+export function rows(ground: ZoneGround, margin: number, depth: () => number, width: () => number): RowLot[] {
+  const g = { ...ground, drive: undefined }
   const lots: RowLot[] = []
   for (const { a, len, ux, uy, nx, ny, ry, onRoad } of runs(g, margin)) {
     const d = depth()
@@ -333,8 +346,8 @@ export const offRun = (r: Run, q: Vec) => Math.abs((q.x - r.a.x) * r.nx + (q.y -
 
 /**
  * The lengths of run `run` of a Block's outline that a border `thick` m thick takes, as [from, to] in m along it (#180
- * a park's azaleas, #182 an allotments' fence): open a metre at each end, round each lamp, pole and street tree, and
- * over each of `gaps`; each cut back where it would meet what is claimed, as another run's at a shallow corner; and
+ * a park's azaleas, #182 an allotments' fence): open a metre at each end, round each lamp, pole and street tree, over
+ * the Drive (#327) and over each of `gaps`; each cut back where it would meet what is claimed, as another run's at a shallow corner; and
  * 1.2 m or longer. Each claims its ground.
  */
 export function borderLengths(g: ZoneGround, run: Run, thick: number, gaps: [number, number][]): [number, number][] {
@@ -343,17 +356,21 @@ export function borderLengths(g: ZoneGround, run: Run, thick: number, gaps: [num
   const open: [number, number][] = [[-1, 1], [run.len - 1, run.len + 1], ...gaps]
   for (const q of [...g.lamps, ...g.poles, ...g.kerbsideTrees])
     if (offRun(run, q) < 1.3) open.push([alongRun(run, q) - 1, alongRun(run, q) + 1])
+  /** The length from `a` to `b` m along the run, as ground. */
+  const piece = (a: number, b: number): RowLot => {
+    const m = (a + b) / 2
+    return { x: run.a.x + run.ux * m, y: run.a.y + run.uy * m, w: b - a, d: thick, ry: run.ry, onRoad: true }
+  }
+  if (g.drive && overlap(g.drive, piece(0, run.len), 0)) {
+    const along = corners(g.drive, 0).map((q) => alongRun(run, q))
+    open.push([Math.min(...along) - 0.3, Math.max(...along) + 0.3])
+  }
   open.sort((a, b) => a[0] - b[0])
   const lengths: [number, number][] = []
   let from = 0
   for (const [a, b] of open) {
     if (a - from >= 1.2) lengths.push([from, a])
     from = Math.max(from, b)
-  }
-  /** The length from `a` to `b` m along the run, as ground. */
-  const piece = (a: number, b: number): RowLot => {
-    const m = (a + b) / 2
-    return { x: run.a.x + run.ux * m, y: run.a.y + run.uy * m, w: b - a, d: thick, ry: run.ry, onRoad: true }
   }
   const free = (l: RowLot) => kit.unclaimed(l.x, l.y, l.w, l.d, l.ry)
   for (const length of lengths) {

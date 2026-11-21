@@ -8,7 +8,6 @@ import {
   AERIAL,
   AIRCON,
   baysOf,
-  BAYS_AND_DOORS,
   BIKES,
   BIKE_RACK,
   boxFace,
@@ -19,6 +18,7 @@ import {
   FRONTAGE,
   GARDEN,
   HOME,
+  KEPT_CLEAR,
   type Kit,
   type Look as KitLook,
   LEAVES,
@@ -46,6 +46,7 @@ import {
   fit,
   lotsOf,
   near,
+  onDrive,
   overlap,
   PLANTER,
   rows,
@@ -134,6 +135,10 @@ function terraces(g: ZoneGround) {
   const plans = mulberry32(spot(centre.x, centre.y) ^ 0x7e44ace) // the plans' own stream: the kit's draws as they did
   const scenes = kit.finished ? terraceScenes(g, lots, plans) : []
   const open = new Set(scenes.flatMap((s) => s.lots)) // the lots the scenes take
+  // And the lots on the Drive (#327), each drawn as it was and left empty, so that no other lot changes: what stands by
+  // a house's walls keeps off both.
+  const drive = lots.flatMap((l, i) => (onDrive(g, l) ? [i] : []))
+  const empty = new Set([...open, ...drive])
   const storeys: number[] = []
   const planned: TerracePlan[] = []
   const signs: RowLot[] = [] // the corner shops' end walls, where no rack or stairs stand
@@ -147,13 +152,15 @@ function terraces(g: ZoneGround) {
       planned.push({ roof: 'gable', ends: [] })
       continue
     }
-    const plan = terracePlan(lots, i, storeys, planned, plans, corners < MEDIUM_FINISH.corners, open)
-    planned.push(plan)
-    if (plan.corner) {
-      corners++
-      signs.push({ ...turned(l.x, l.y, l.ry, plan.corner.end * (l.w / 2 + 0.8), l.d / 2 - 1.3), w: 1.6, d: 2.8, ry: l.ry, onRoad: false })
-    }
-    kit.staged((stage) => townhouse(kit, l.x, l.y, KERB, l.w, l.d, l.ry, TERRACE_STOREYS(s, stage), stage, plan))
+    kit.muted(() => {
+      const plan = terracePlan(lots, i, storeys, planned, plans, corners < MEDIUM_FINISH.corners, open)
+      planned.push(plan)
+      if (plan.corner) {
+        corners++
+        signs.push({ ...turned(l.x, l.y, l.ry, plan.corner.end * (l.w / 2 + 0.8), l.d / 2 - 1.3), w: 1.6, d: 2.8, ry: l.ry, onRoad: false })
+      }
+      kit.staged((stage) => townhouse(kit, l.x, l.y, KERB, l.w, l.d, l.ry, TERRACE_STOREYS(s, stage), stage, plan))
+    }, drive.includes(i))
   }
   kit.lot(-1)
   yards(g, lots, TERRACES.trees, kit.finished)
@@ -163,7 +170,7 @@ function terraces(g: ZoneGround) {
   // A corner by a row's end (#156), beyond its end wall from its front back: one from Stage 2, a second from Stage 3.
   let from = 2
   for (const [i, l] of lots.entries()) {
-    for (const s of from > 3 || open.has(i) ? [] : [1, -1]) {
+    for (const s of from > 3 || empty.has(i) ? [] : [1, -1]) {
       const [u0, u1] = [l.w / 2 + 0.1, l.w / 2 + 0.3 + CORNER.wide]
       const c = turned(l.x, l.y, l.ry, (s * (u0 + u1)) / 2, l.d / 2 - CORNER.long / 2)
       const ry = l.ry - (s * Math.PI) / 2 // facing out of the end wall, the corner's rack along it
@@ -175,11 +182,11 @@ function terraces(g: ZoneGround) {
   const [W, rise] = [WALL_STAIR.wide, 3.04]
   const L = rise * WALL_STAIR.run + landing
   for (const [i, l] of lots.entries()) {
-    for (const s of open.has(i) ? [] : [1, -1]) {
+    for (const s of empty.has(i) ? [] : [1, -1]) {
       const c = turned(l.x, l.y, l.ry, s * (l.w / 2 + 0.05 + W / 2), l.d / 2 - 0.2 - L / 2)
       const ry = l.ry - (s * Math.PI) / 2 // the wall at its back, its flight along the house's depth
       if (mulberry32(spot(c.x, c.y))() > TERRACES.stairs) continue
-      const free = kit.unclaimed(c.x, c.y, L, W + 0.1, ry, 0, ['stand']) && kit.unclaimed(c.x, c.y, L, W, ry, 0, BAYS_AND_DOORS)
+      const free = kit.unclaimed(c.x, c.y, L, W + 0.1, ry, 0, ['stand']) && kit.unclaimed(c.x, c.y, L, W, ry, 0, KEPT_CLEAR)
       if (!stands(g, c.x, c.y, L, W, 0.6, ry) || !free) continue
       kit.stand(c.x, c.y, L, W + 0.1, ry, 2)
       kit.lot(i)
@@ -195,7 +202,7 @@ function terraces(g: ZoneGround) {
   if (!kit.finished) return
   alleys(
     g,
-    lots.filter((_, i) => !open.has(i)),
+    lots.filter((_, i) => !empty.has(i)),
   )
   for (const { kind, ground, from } of scenes) {
     kit.scene(kind, () => kit.staged((stage) => mediumScene(kit, kind, ground, stage, from), spot(ground.x, ground.y)))
@@ -203,11 +210,11 @@ function terraces(g: ZoneGround) {
   }
   gardens(
     g,
-    lots.filter((_, i) => !open.has(i)),
+    lots.filter((_, i) => !empty.has(i)),
   )
   bins(g, plans)
   const doors = lots.flatMap((l, i) => {
-    if (open.has(i) || !l.onRoad) return []
+    if (empty.has(i) || !l.onRoad) return []
     // Before its door; or, for a corner shop, beyond the row's end, coming in and going from the far side, so that it
     // waits and turns round clear of the awning over its front, which reaches 1.65 m out and to 0.25 m short of the
     // row's end: the scooter is 2.6 m long, and turns round 1.9 m to the side it does not come in from. It stops 1.05 m
@@ -220,7 +227,7 @@ function terraces(g: ZoneGround) {
   // The scooter keeps out from under the corner shops' awnings, which reach 1.65 m out along the glazing: the last
   // ground claimed, which nothing else on the pavement asks after.
   for (const [i, l] of lots.entries()) {
-    if (planned[i].corner?.kind !== 'shop' || open.has(i)) continue
+    if (planned[i].corner?.kind !== 'shop' || empty.has(i)) continue
     const a = turned(l.x, l.y, l.ry, 0, l.d / 2 + 0.85)
     kit.stand(a.x, a.y, l.w - 0.5, 1.6, l.ry)
   }
@@ -356,6 +363,7 @@ function terraceScenes(g: ZoneGround, lots: RowLot[], draw: () => number): Mediu
         width += lots[j].w
       }
       if (width < wide || lots[i].d < deep || (road && !span.every((k) => lots[k].onRoad))) continue
+      if (span.some((k) => onDrive(g, lots[k]))) continue // none on the Drive's lot, left empty (#327)
       if (out.some((o) => o.lots.some((k) => span.some((j) => Math.abs(j - k) <= 1)))) continue
       const [a, b] = [lots[span[0]], lots[span[span.length - 1]]]
       const [p, q] = [turned(a.x, a.y, a.ry, -a.w / 2, 0), turned(b.x, b.y, b.ry, b.w / 2, 0)]
@@ -383,7 +391,7 @@ function courtScenes(g: ZoneGround, draw: () => number, round: RowLot[]): Medium
     (l: RowLot) =>
       clearOfScenes(out, l) &&
       g.kit.unclaimed(l.x, l.y, l.w, l.d, l.ry, by, ['stand']) &&
-      g.kit.unclaimed(l.x, l.y, l.w, l.d, l.ry, 0, BAYS_AND_DOORS) &&
+      g.kit.unclaimed(l.x, l.y, l.w, l.d, l.ry, 0, KEPT_CLEAR) &&
       clear(l)
   // Clear of the buildings' room round them.
   const roomy = (l: RowLot) => !round.some((o) => overlap(o, l))
@@ -408,7 +416,7 @@ function bins(g: ZoneGround, draw: () => number) {
   const room = { lampRoom: 1.2, clear: 0.4, ends: 4, slide: true }
   // Clear of what stands but for a sliver (0.02 m in from each side of both), and of the bays and door steps.
   const ok = (l: RowLot) =>
-    g.kit.unclaimed(l.x, l.y, l.w, l.d, l.ry, -0.02, ['stand']) && g.kit.unclaimed(l.x, l.y, l.w, l.d, l.ry, 0, BAYS_AND_DOORS)
+    g.kit.unclaimed(l.x, l.y, l.w, l.d, l.ry, -0.02, ['stand']) && g.kit.unclaimed(l.x, l.y, l.w, l.d, l.ry, 0, KEPT_CLEAR)
   const l = alongEdge(g, draw, runs(g, 0.65), [[2.1, 1.1]], room, ok)
   if (!l) return
   g.kit.stand(l.x, l.y, l.w, l.d, l.ry)
@@ -750,7 +758,7 @@ function bareGround(g: ZoneGround, built: Built[], way: Vec[]) {
   const clear = (l: RowLot) =>
     stands(g, l.x, l.y, l.w, l.d, 0.5, l.ry) &&
     g.kit.unclaimed(l.x, l.y, l.w + 0.6, l.d + 0.6, l.ry, -0.15, ['stand']) && // grown 0.3 m, but for a sliver
-    g.kit.unclaimed(l.x, l.y, l.w, l.d, l.ry, 0, BAYS_AND_DOORS) && // nor before a door or on a bay (#193)
+    g.kit.unclaimed(l.x, l.y, l.w, l.d, l.ry, 0, KEPT_CLEAR) && // nor before a door or on a bay (#193)
     !buildings.some((b) => overlap({ ...b, w: b.w + 1, d: b.d + 1 }, l)) &&
     ![...g.lamps, ...g.poles].some((p) => near(l, p.x, p.y, 1)) &&
     !passing.some((p) => near(l, p.x, p.y, keep))
@@ -945,7 +953,7 @@ function courtGround(g: ZoneGround, b: Built) {
         const l = { ...turned(mx, my, ry, u, 2.6), w: 4.6, d: 4.4, ry, onRoad: false }
         if (!stands(g, l.x, l.y, l.w, l.d, 0.6, ry) || g.lamps.some((p) => near(l, p.x, p.y, 1.2))) continue
         // Clear of what stands but for a sliver (0.15 m in from each side of both), nor before a door (#193).
-        if (!kit.unclaimed(l.x, l.y, l.w, l.d, ry, -0.15, ['stand']) || !kit.unclaimed(l.x, l.y, l.w, l.d, ry, 0, BAYS_AND_DOORS)) continue
+        if (!kit.unclaimed(l.x, l.y, l.w, l.d, ry, -0.15, ['stand']) || !kit.unclaimed(l.x, l.y, l.w, l.d, ry, 0, KEPT_CLEAR)) continue
         kit.stand(l.x, l.y, l.w, l.d, ry)
         return pocketCourt(g, l)
       }
@@ -959,7 +967,7 @@ function courtGround(g: ZoneGround, b: Built) {
   if (Math.min(court.w, court.d) < 4 || !stands(g, court.x, court.y, court.w, court.d, 0.6)) return
   // Clear of what stands but for a sliver, as above, nor before a door (#193).
   if (!kit.unclaimed(court.x, court.y, court.w, court.d, 0, -0.15, ['stand'])) return
-  if (!kit.unclaimed(court.x, court.y, court.w, court.d, 0, 0, BAYS_AND_DOORS)) return
+  if (!kit.unclaimed(court.x, court.y, court.w, court.d, 0, 0, KEPT_CLEAR)) return
   kit.stand(court.x, court.y, court.w, court.d)
   // The tree in the corner the wings make, the bench facing it.
   const tx = c.x0 <= x0 + 0.01 ? ix0 + 1.6 : ix1 - 1.6

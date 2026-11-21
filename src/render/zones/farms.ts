@@ -3,13 +3,15 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { mulberry32 } from '../../sim/demand'
 import { middle, polyline, type Polyline, type Vec } from '../../sim/geometry'
 import { KERB } from '../blocks'
+import { driveCorners } from '../drive'
 import { inside } from '../field'
 import { CREAM, DOOR, HARVEST, type Kit, type Look as KitLook, LEDGE, SHAPES, spot, STRAW, to } from '../kit'
 import { clearOf, GRASS, overlay, site } from '../landmarks'
 import { PATTERN, type Pattern } from '../pattern'
 import { bench, GLOWS, menuBoard, STALL, STONE, WOOD } from '../props'
 import { person, wheelbarrow } from './green'
-import { corners, near, overlap, runs, stands, type Look, type RowLot, type ZoneGround } from './ground'
+import type { Footprint } from '../kerbside'
+import { corners, near, onDrive, overlap, runs, stands, type Look, type RowLot, type ZoneGround } from './ground'
 import { clearOfScenes, facesRoad, placeScenes, sceneOrder, type Scene } from './scenes'
 import { nobori } from './shops'
 
@@ -327,7 +329,7 @@ function farm(g: ZoneGround) {
   /** A point on the map, along the Block and across it. */
   const st = (x: number, y: number): [number, number] => (along ? [x, y] : [y, x])
   /** The ground a box turned as a row lot is takes, along the Block and across it. */
-  const patchOf = (l: RowLot): Patch => {
+  const patchOf = (l: Footprint): Patch => {
     const pts = corners(l, 0).map((p) => st(p.x, p.y))
     return {
       s0: Math.min(...pts.map((p) => p[0])),
@@ -341,7 +343,8 @@ function farm(g: ZoneGround) {
   // drew them.
   const end = along ? { x: block.x0 + 12, y: mid.y } : { x: mid.x, y: block.y1 - 12 }
   const [yw, yd] = along ? [YARD.along, YARD.across] : [YARD.across, YARD.along]
-  const yard = kit.chance(0.45) ? site(field, block, yw, yd, end, kerbsideTrees, 1) : null
+  const drive = g.drive ? driveCorners(g.drive) : [] // which the farmyard keeps off (#327)
+  const yard = kit.chance(0.45) ? site(field, block, yw, yd, end, [...kerbsideTrees, ...drive], 1) : null
   const yardRy = along ? -Math.PI / 2 : Math.PI
   const home = along ? -1 : 1
   const seeds = yard ? [kit.rand(), kit.rand(), kit.rand()].map((v) => (v * 4294967296) >>> 0) : []
@@ -351,16 +354,16 @@ function farm(g: ZoneGround) {
   const draw = mulberry32(spot(mid.x, mid.y) ^ 0xfa12)
   const order = sceneOrder(g, draw, KINDS, SCENES.second)
   const scenes = placeScenes<FarmScene, Scene<FarmScene>>(yard ? order.slice(1) : order, KINDS, (kind, out) => {
-    const ok = (l: RowLot) => clearOfScenes(out, l) && !(yardLot && overlap({ ...yardLot, w: yw + 6, d: yd + 6 }, l))
+    const ok = (l: RowLot) => clearOfScenes(out, l) && !(yardLot && overlap({ ...yardLot, w: yw + 6, d: yd + 6 }, l)) && !onDrive(g, l)
     const found =
       (kind === 'stand' ? sceneGround(g, draw, SCENES.size[kind], along, true, ok) : null) ??
       sceneGround(g, draw, SCENES.size[kind], along, false, ok)
     return found && { ground: found }
   })
   if (yard) for (const s of scenes) s.from = 3
-  const keeps = [...(yardLot ? [yardLot] : []), ...scenes.map((s) => s.ground)].map(patchOf)
+  const keeps = [...(yardLot ? [yardLot] : []), ...scenes.map((s) => s.ground), ...(g.drive ? [g.drive] : [])].map(patchOf)
 
-  // Rows across the Block, cut into lengths that stand clear of its edge, of the farmyard and of the scenes, with a
+  // Rows across the Block, cut into lengths that stand clear of its edge, of the farmyard, the scenes and the Drive, with a
   // headland beyond their ends; five rows to a field. The first row's place is the irrigation channel's.
   const { row: apart, length, gap, rows: perField, head, lane, clear } = FARM
   const [from, upTo] = along ? [block.y0 + 3, block.y1 - 3] : [block.x0 + 3, block.x1 - 3]

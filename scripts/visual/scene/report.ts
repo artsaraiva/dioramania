@@ -64,9 +64,12 @@ export interface Thing {
   pools: number
 }
 
-/** Ground a fill laid to be kept clear: a parking bay, a taxi bay, the step before a door, the ground a piece stands on. */
+/**
+ * Ground a fill laid to be kept clear: a parking bay, a taxi bay, the step before a door, a Block's Drive, the ground a
+ * piece stands on.
+ */
 export interface Claim {
-  kind: 'bay' | 'taxi' | 'door' | 'stand'
+  kind: 'bay' | 'taxi' | 'door' | 'drive' | 'stand'
   tile: string
   block: number
   hull: Hull

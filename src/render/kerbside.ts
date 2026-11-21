@@ -51,8 +51,8 @@ const STANDS = { cell: 0.5, band: 4, low: 0.06, tall: 0.4, clear: 0.5, rise: 0.1
 // (its probe's octagon reaches 3.7 to 4 m), nor a bay lies at it. The most of the check's points a run may hold before a
 // pair of bollards breaks it (it fails at 12), and how far the pair keeps from a rail's posts.
 const BARE = { road: 6, reach: 3.6, most: 11, rail: 1.5 }
-// The claims the scene check reads as no pavement, a lay-by off the Road (#193).
-const BAYS = ['bay', 'taxi'] as const
+// The claims the scene check reads as no pavement: a lay-by off the Road (#193), or the Drive (#327).
+const AT_KERB = ['bay', 'taxi', 'drive'] as const
 
 /** A box `w` by `d` centred on `(x, y)` and turned `ry`, as a look lays something on a Block. */
 export interface Footprint {
@@ -186,7 +186,7 @@ export function standing(block: Block, field: Field, built: Built): Stands {
 }
 
 /** A Block's outline, its inward direction at each point, and how far along it each point lies. */
-function walk(loop: Vec[]) {
+export function walk(loop: Vec[]) {
   const turn = twiceArea(loop) > 0 ? 1 : -1 // counterclockwise, the inside is to the left of the way round
   const n = loop.length
   const inward = loop.map((_, i) => {
@@ -475,7 +475,7 @@ export function dressKerbside(kit: Kit, block: Block, field: Field, net: Network
     const q = loop[i]
     return (
       !kerb[i] ||
-      !kit.unclaimed(q.x, q.y, 1.9, 1.9, alongEdge(i), 0, BAYS) ||
+      !kit.unclaimed(q.x, q.y, 1.9, 1.9, alongEdge(i), 0, AT_KERB) ||
       stands.feet(q.x, q.y, BARE.reach) ||
       [fixtures, placed].some((l) => l.some((s) => near(q, s, BARE.reach)))
     )
