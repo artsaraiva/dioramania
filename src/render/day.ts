@@ -104,6 +104,7 @@ export function createDay(canvas: HTMLCanvasElement, slab: Bounds) {
   let held = false // stopped by `hold`
   let sky = ''
   const mixed = new THREE.Color()
+  const stops = SKY.map(() => new THREE.Color())
 
   /** Show the time of day `p`, 0–1. */
   const show = (p: number): Glow => {
@@ -125,7 +126,8 @@ export function createDay(canvas: HTMLCanvasElement, slab: Bounds) {
     fill.groundColor.copy(mix(FILL.ground))
     fill.intensity = num(FILL.intensity)
 
-    const gradient = `linear-gradient(180deg,${SKY.map((stop, s) => `#${mix(stop).getHexString()} ${s * 50}%`).join(',')})`
+    SKY.forEach((stop, s) => stops[s].copy(mix(stop)))
+    const gradient = `linear-gradient(180deg,${stops.map((c, s) => `#${c.getHexString()} ${s * 50}%`).join(',')})`
     if (gradient !== sky) canvas.style.background = sky = gradient
 
     const lamps = num(GLOW.lamps)
@@ -136,6 +138,9 @@ export function createDay(canvas: HTMLCanvasElement, slab: Bounds) {
     lights: [fill, light, light.target],
 
     fit,
+
+    /** The sky gradient's stops shown, top, middle and bottom, as the canvas's background has them. */
+    sky: stops as readonly THREE.Color[],
 
     /** The time of day shown, 0–1 (0 morning, 0.25 noon, 0.5 dusk, 0.75 night). */
     get time() {
