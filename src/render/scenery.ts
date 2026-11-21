@@ -7,7 +7,8 @@ import { middle, sameBounds, type Bounds, type Vec } from '../sim/geometry'
 import type { Sim } from '../sim/sim'
 import type { Point } from '../sim/spec'
 import { cellAt } from '../sim/tiles'
-import { block, pavement, wide, type Block } from './blocks'
+import type { Place } from '../walkers/walkers'
+import { block, KERB, pavement, wide, type Block } from './blocks'
 import { inside, type Field } from './field'
 import { blockSeed, fillBlock } from './fill'
 import { createKit, type Brick, type Kit, type Materials, type Part, type Stages } from './kit'
@@ -98,6 +99,10 @@ export interface Build {
   flags: Flag[]
   /** The pools of light on the ground, each riding the brick of what lights it (`./movers`, #174). */
   pools: Pool[]
+  /** Where a Walker can go that the Blocks built stand with, at ground level and as the new Stage has it (#288). */
+  places: Place[]
+  /** What a Walker would walk into, each the convex hull (counter-clockwise) on the map of a part standing at walking height (#288). */
+  obstacles: Vec[][]
   /** The middle of each Block built. */
   blocks: { middle: Vec }[]
   pieces: Bounds[]
@@ -119,6 +124,32 @@ function wearAlike(geometries: THREE.BufferGeometry[]) {
     for (const [name, size] of sizes)
       if (!g.getAttribute(name)) g.setAttribute(name, new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * size), size))
   }
+}
+
+/**
+ * The convex hull of `points`, counter-clockwise (Andrew's monotone chain): two points make a segment, one a point.
+ *
+ * ponytail: a part merged from pieces that make an L or a U also stands across the corner it holds, so a Place in that
+ * corner goes unused; hull its pieces one by one if that shows.
+ */
+function hull(points: Vec[]): Vec[] {
+  const p = [...points].sort((a, b) => a.x - b.x || a.y - b.y).filter((v, i, a) => !i || v.x !== a[i - 1].x || v.y !== a[i - 1].y)
+  if (p.length < 3) return p
+  const half = (list: Vec[]) => {
+    const out: Vec[] = []
+    for (const v of list) {
+      while (
+        out.length > 1 &&
+        (out[out.length - 1].x - out[out.length - 2].x) * (v.y - out[out.length - 2].y) -
+          (out[out.length - 1].y - out[out.length - 2].y) * (v.x - out[out.length - 2].x) <=
+          0
+      )
+        out.pop()
+      out.push(v)
+    }
+    return out.slice(0, -1)
+  }
+  return [...half(p), ...half([...p].reverse())]
 }
 
 /** Take every step of a build that is left, at once. */
@@ -183,6 +214,7 @@ export function createScenery(
     const sways: Sway[] = []
     const flags: Flag[] = []
     const pools: Pool[] = []
+    const places: Place[] = []
     /** Take over what a kit built, its bricks standing on Block `index`. */
     const take = (kit: Kit, index: number) => {
       const done = kit.done()
@@ -194,6 +226,9 @@ export function createScenery(
       for (const sway of done.sways) sways.push({ ...sway, brick: sway.brick + bricks.length })
       for (const flag of done.flags) flags.push({ ...flag, brick: flag.brick + bricks.length })
       for (const pool of done.pools) pools.push({ ...pool, brick: pool.brick + bricks.length })
+      // A Stage-up build holds both Stages: the Places are the new one's. A bench keeps to the ground a Walker walks.
+      for (const { kind, x, y, ry, h, brick } of done.places)
+        if (done.bricks[brick]?.fate !== 'goes' && (kind === 'door' || Math.abs((h ?? KERB) - KERB) < 0.3)) places.push({ kind, x, y, ry })
       bricks.push(...done.bricks.map((brick) => ({ ...brick, block: index })))
     }
     const slab = createKit(mulberry32(0), materials, watch?.label)
@@ -234,6 +269,21 @@ export function createScenery(
       yield
     }
 
+    // What a Walker would walk into: the parts standing across the heights it walks at, but windows and what goes.
+    const obstacles: Vec[][] = []
+    const box = new THREE.Box3()
+    const corner = new THREE.Vector3()
+    for (const part of parts) {
+      if (part.window || bricks[part.brick]?.fate === 'goes') continue
+      const position = part.geometry.attributes.position
+      box.setFromBufferAttribute(position as THREE.BufferAttribute)
+      // Ground paint, a meadow's or a path's sheet, is stepped over however high it lies.
+      if (box.max.y < KERB + 0.25 || box.min.y > KERB + 1.8 || box.max.y - box.min.y < 0.1) continue
+      const points: Vec[] = []
+      for (let k = 0; k < position.count; k++) points.push({ x: corner.fromBufferAttribute(position, k).x, y: -corner.z })
+      obstacles.push(hull(points))
+    }
+
     const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>()
     for (const { geometry, material, brick } of parts) {
       if (tagged)
@@ -253,7 +303,20 @@ export function createScenery(
       meshes.push(mesh)
       yield
     }
-    return { meshes, bricks, movers, plumes, beacons, sways, flags, pools, blocks: blocks.map((b) => ({ middle: middle(b) })), pieces }
+    return {
+      meshes,
+      bricks,
+      movers,
+      plumes,
+      beacons,
+      sways,
+      flags,
+      pools,
+      places,
+      obstacles,
+      blocks: blocks.map((b) => ({ middle: middle(b) })),
+      pieces,
+    }
   }
 
   /** Start a build of `pieces` as the last pieces laid. */

@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { sameBounds, type Bounds } from '../sim/geometry'
 import { cellBounds } from '../sim/tiles'
-import { Walkers } from './walkers'
+import { Walkers, type Place } from './walkers'
 
 /** The pavement round a square Block `inset` m in from the edges of `tile`. */
 function pavement(tile: Bounds, inset: number) {
@@ -59,4 +59,38 @@ it('a Swap or an Undo of one Tile leaves the Walkers of the others who they were
   city.takeOff([EAST])
   expect(on(city, EAST)).toEqual([])
   expect(on(city, WEST)).toEqual(west)
+})
+
+// Places
+
+/** A box on the map from (x0, y0) to (x1, y1), counterclockwise. */
+const box = (x0: number, y0: number, x1: number, y1: number) => [
+  { x: x0, y: y0 },
+  { x: x1, y: y0 },
+  { x: x1, y: y1 },
+  { x: x0, y: y1 },
+]
+// On the west Tile's pavement 12 m in, along its south side: a shop door with a pot straight between it and the
+// pavement, and a bench. Both face south, to the pavement.
+const DOOR: Place = { kind: 'door', x: 0, y: -35, ry: Math.PI }
+const BENCH: Place = { kind: 'bench', x: -20, y: -30, ry: Math.PI }
+const POT = box(-0.3, -37, 0.3, -36.4)
+
+/** What each Walker of a City of seed `seed` with the west Tile was doing, and where, every step of ten minutes. */
+function seen(seed: number) {
+  const walkers = new Walkers(seed)
+  walkers.add(WEST, [pavement(WEST, 12)], [DOOR, BENCH], [POT])
+  const steps: string[][] = []
+  for (let t = 0; t < 600; t += 0.1) {
+    walkers.step(0.1)
+    steps.push(walkers.all.map((w) => `${w.doing}:${w.way?.place.kind ?? ''}@${w.s.toFixed(2)}`))
+  }
+  return steps
+}
+
+it('what each Walker does comes from the City’s seed', () => {
+  const seven = seen(7)
+  expect(seen(7)).toEqual(seven)
+  expect(seen(8)).not.toEqual(seven)
+  expect(['act:door', 'act:bench'].every((act) => seven.flat().some((w) => w.startsWith(act)))).toBe(true)
 })

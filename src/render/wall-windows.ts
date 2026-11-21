@@ -210,6 +210,8 @@ export interface Planting {
 export interface Windows {
   parts: Map<WindowPart, number[]>
   plantings: Planting[]
+  /** The doors built (#288): the middle of each leaf's foot on its outer face, and the way out of the wall, in the wall's frame. */
+  doors: { at: THREE.Vector3; out: THREE.Vector3 }[]
 }
 
 /** Whether a wall wearing `kind`, flat (`clad`) or round (`wrap`), has windows, which low poly builds as boxes. */
@@ -257,6 +259,7 @@ export function wallWindows(min: THREE.Vector3, max: THREE.Vector3, cladding: Cl
   // The windows built, each one's boxes, the way its wall's back faces, and the flower box for its sill; and the pots.
   const built: { boxes: Box[]; back: THREE.Vector3; planted?: Planting }[] = []
   const potted: Planting[] = []
+  const doors: Windows['doors'] = []
   /** The draws of what stands at bay `b` of storey `s` of wall `wall` (-1: at the foot), one stream each (#278). */
   const drawsAt = (wall: number, s: number, b: number) =>
     mulberry32((seed ^ PLANT_SALT ^ Math.imul(((wall * 64 + s + 1) << 10) + b + 1, 0x9e3779b1)) >>> 0)
@@ -379,6 +382,13 @@ export function wallWindows(min: THREE.Vector3, max: THREE.Vector3, cladding: Cl
           // A flower box's sill waits, for the kit to build the one or the other.
           for (const g of stands) if (!planted || g.part !== 'sill') build(g)
           built.push({ boxes: stands, back, planted })
+          const [leaf] = boxes
+          if (leaf.part === 'door') {
+            const face = axis === 2 ? (sign > 0 ? leaf.hi.z : leaf.lo.z) : sign > 0 ? leaf.hi.x : leaf.lo.x
+            const at = new THREE.Vector3((leaf.lo.x + leaf.hi.x) / 2, leaf.lo.y, (leaf.lo.z + leaf.hi.z) / 2)
+            at.setComponent(axis, face)
+            doors.push({ at, out: back.clone().negate() })
+          }
         }
       }
     }
@@ -431,7 +441,7 @@ export function wallWindows(min: THREE.Vector3, max: THREE.Vector3, cladding: Cl
     else boxFaces(trianglesOf(out, 'sill'), planted.sill!.lo, planted.sill!.hi, back)
   }
   plantings.push(...potted.filter((p) => !meetsWindows(p)))
-  return { parts: out, plantings }
+  return { parts: out, plantings, doors }
 }
 
 /** The box round `solids`. */
@@ -466,7 +476,7 @@ export function wrapWindows(
 ): Windows {
   const spec = PATTERN_WINDOWS[kind]
   const out = new Map<WindowPart, number[]>()
-  if (!spec) return { parts: out, plantings: [] }
+  if (!spec) return { parts: out, plantings: [], doors: [] }
   const bays = Math.max(1, Math.round((2 * Math.PI * r) / bay))
   const draw = mulberry32(seed ^ SALT)
   const lean = Math.atan2(r - top, tall)
@@ -544,7 +554,7 @@ export function wrapWindows(
       }
   // ponytail: no flower boxes or pots round a cylinder, so the coral tower's tiers keep plain sills and bare feet. Lay
   // them as its panes are, square to the face under each (`m`), if a Zone ever builds homes round a cylinder.
-  return { parts: out, plantings: [] }
+  return { parts: out, plantings: [], doors: [] }
 }
 
 /** A box's faces: each one's axis and side, and its four corners (1 the far end of each axis) round counter-clockwise from outside. */

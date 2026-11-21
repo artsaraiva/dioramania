@@ -119,7 +119,7 @@ export function createView(
   const signals = createSignals()
   const cars = createCars(sim.net)
   const walkers = createWalkers(ground.scenery.seed)
-  walkers.add(sim.net, field, pieces)
+  pieces.forEach((piece, i) => walkers.add(sim.net, field, [piece], laid[i].places, laid[i].obstacles))
   const emotion = createJamEmotion()
   const tools = createTools()
   const route = createRouteInspector()
@@ -159,6 +159,9 @@ export function createView(
     }
     used.reveal.play(built, { plate() {}, done }, 'stage-up')
     movers.add(built, used.reveal)
+    // ponytail: the ways change as the Stage-up starts, so while it plays a Walker may pass a building going or step up
+    // to a door yet to come; keep what goes standing in the ways till `done` if it shows.
+    walkers.refit([job.piece], built.places, built.obstacles)
     if (quietly) used.reveal.settle()
   }
   /** Finish at once the build of the Stage-up begun, if any, which then plays in its turn. */
@@ -451,7 +454,8 @@ export function createView(
      */
     rezone(sim: Sim, piece: Bounds) {
       makeWay(piece)
-      regrowPiece(piece, scenery.rezone(sim, piece))
+      const build = regrowPiece(piece, scenery.rezone(sim, piece))
+      walkers.refit([piece], build.places, build.obstacles)
     },
 
     /**
@@ -530,7 +534,7 @@ export function createView(
         done() {
           if (!ours()) return
           assembly.built = true
-          walkers.add(planned.net, field, build.pieces)
+          walkers.add(planned.net, field, build.pieces, build.places, build.obstacles)
           sky.fit(slab)
           restring()
           openLanded()
@@ -562,7 +566,7 @@ export function createView(
       else {
         walkers.remove([piece])
         const build = regrowPiece(piece, scenery.swap(sim, piece))
-        walkers.add(sim.net, field, build.pieces)
+        walkers.add(sim.net, field, build.pieces, build.places, build.obstacles)
       }
       restring()
       refit()
