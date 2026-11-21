@@ -5,6 +5,7 @@ import type { Lane, Network } from '../sim/network'
 import type { NetworkSpec } from '../sim/spec'
 import { CELL, cellAt } from '../sim/tiles'
 import { KERB, type Block } from './blocks'
+import { driveCorners, driveOf, nearDrive, plainDrive } from './drive'
 import { inside, type Field } from './field'
 import type { Kit } from './kit'
 import { bikeLane, island, site, tower, towerGround } from './landmarks'
@@ -90,7 +91,8 @@ export function blockSeed(scenery: Scenery, { x0, y0, x1, y1 }: Bounds): number 
 /**
  * What stands on one Block, added to `kit` brick by brick: a roundabout's island, a landmark or special Block from
  * the scenery, a bike lane on a narrow Block, and otherwise what its Tile's Zone builds (`./zones`), or grass on an
- * unzoned Tile, with lamps at its corners, trees along the avenues and its kerbside dressed (`./kerbside`). It reads
+ * unzoned Tile, with lamps at its corners, trees along the avenues, its Drive on a zoned Tile (`./drive`) and its
+ * kerbside dressed (`./kerbside`). It reads
  * only the Block, its surroundings and the scenery, so a Block that a change to the City leaves alone comes out the same. Where
  * the Block lies seeds its random choices and nothing more: a Zone builds alike anywhere in the City.
  */
@@ -101,7 +103,23 @@ export function fillBlock(kit: Kit, block: Block, { net, spec, scenery, field, z
   const roundabout = net.junctions.find((j) => j.type === 'roundabout' && inside(block.loop, j.at.x, j.at.y))
   if (roundabout) return island(kit, field, block, roundabout.at)
 
-  const lamps = lampSpots(block, field)
+  // Street trees along the avenues, whatever the Zone: on the pavement, just in from the kerb. They are planted last,
+  // and what is built keeps clear of them; a special Block or a bike lane has none.
+  const avenueTrees: Vec[] = []
+  for (const lane of net.lanes) {
+    if (!('road' in lane.owner) || lane.index !== 0 || !avenue(scenery, lane)) continue
+    const side = (spec.roads[lane.owner.road].laneWidth ?? spec.roadDefaults.laneWidth) / 2 + KERBSIDE_TREES.inset
+    for (let s = KERBSIDE_TREES.spacing / 2; s < lane.length; s += KERBSIDE_TREES.spacing) {
+      const p = pointAt(lane.line, s)
+      const [x, y] = [p.x + Math.sin(p.heading) * side, p.y - Math.cos(p.heading) * side] // lane 0 is the rightmost
+      if (inside(block.loop, x, y) && field.sample(x, y) >= 1) avenueTrees.push({ x, y })
+    }
+  }
+  // Every Block of a zoned Tile has its Drive (#327), found before its lamps stand: a lamp or a street tree it could not
+  // keep clear of is left off. It is laid before what fills the Block, which keeps off its ground.
+  const spots = lampSpots(block, field)
+  const drive = zone ? driveOf(block, net, field, poles, [...spots, ...avenueTrees]) : null
+  const [lamps, kerbsideTrees] = [spots, avenueTrees].map((l) => (drive ? l.filter((q) => !nearDrive(drive, q)) : l))
   for (const { x, y } of lamps) kit.lamp(x, y, KERB)
   const from = kit.mark() // what stands on the Block from here on, which the street furniture keeps off
   /**
@@ -115,6 +133,7 @@ export function fillBlock(kit: Kit, block: Block, { net, spec, scenery, field, z
     for (const t of kerbsideTrees) kit.tree(t.x, t.y, KERB, KERBSIDE_TREES.size, 'round')
     if (stands) dressKerbside(kit, block, field, net, spec, { lamps, trees: kerbsideTrees, poles, stands, unpaved })
   }
+  if (drive) plainDrive(kit, drive)
   for (const landmark of scenery.landmarks) if (at(landmark.at)) tower(kit, field, block, ...landmark.at)
   const authored = scenery.blocks.find((s) => at(s.at))
   if (authored) {
@@ -134,26 +153,24 @@ export function fillBlock(kit: Kit, block: Block, { net, spec, scenery, field, z
   // its own Block and reserves ground only there, so no other Block changes with it.
   if (scenery.seeded && look?.landmarks) {
     const point = seededLandmark(scenery.seed, block, scenery.seeded.landmarks)
-    const ground = point && site(field, block, 22, 22, point)
+    const ground = point && site(field, block, 22, 22, point, drive ? driveCorners(drive) : [], 0.3)
     if (ground) {
       tower(kit, field, block, ground.x, ground.y)
       reserved.push(towerGround(ground.x, ground.y))
     }
   }
-  // Street trees along the avenues, whatever the Zone: on the pavement, just in from the kerb. They are planted last,
-  // and what is built keeps clear of them.
-  const kerbsideTrees: Vec[] = []
-  for (const lane of net.lanes) {
-    if (!('road' in lane.owner) || lane.index !== 0 || !avenue(scenery, lane)) continue
-    const side = (spec.roads[lane.owner.road].laneWidth ?? spec.roadDefaults.laneWidth) / 2 + KERBSIDE_TREES.inset
-    for (let s = KERBSIDE_TREES.spacing / 2; s < lane.length; s += KERBSIDE_TREES.spacing) {
-      const p = pointAt(lane.line, s)
-      const [x, y] = [p.x + Math.sin(p.heading) * side, p.y - Math.cos(p.heading) * side] // lane 0 is the rightmost
-      if (inside(block.loop, x, y) && field.sample(x, y) >= 1) kerbsideTrees.push({ x, y })
-    }
-  }
 
-  const ground = { kit, block, field, reserved, kerbsideTrees, lamps, poles, tileDraw: tileDraw(scenery.seed, cellAt(middle(block))) }
+  const ground = {
+    kit,
+    block,
+    field,
+    reserved,
+    ...(drive && { drive }),
+    kerbsideTrees,
+    lamps,
+    poles,
+    tileDraw: tileDraw(scenery.seed, cellAt(middle(block))),
+  }
   const unpaved = look ? look.fill(ground) : verge(ground)
   dress(kerbsideTrees, unpaved ?? undefined)
 }

@@ -24,6 +24,23 @@ Where #270 and this spec disagree, #270 wins. It supersedes these parts, which s
 Everything else holds: the rule, the palette's colours, proportion, the slab, the rest of Roads and Blocks, Block fill and each Zone's file, the Finish, the budget and verification.
 A look change keeps each Zone's building designs and its palette.
 
+## Amended by [#327](https://github.com/artsaraiva/dioramania/issues/327) (2026-11-21)
+
+Every Block of a zoned Tile has a Drive (`src/render/drive.ts`), the one place on its kerb where a vehicle turns off the Road; an unzoned Tile has none, nor does a Roundabout's island.
+It lies on the Block's longest Road frontage, as far from the Tile's Junction as the frontage allows, its ground a metre clear of the utility poles and, where the frontage has room, of the lamps and street trees.
+Where it has none, as on a Roundabout's short arms, the lamp or street tree it would stand on is left off.
+It reads nothing of the Zone or the Stage, so it lies in the same place at every Stage and through a Rezoning; a Swap's new Blocks have Drives of their own.
+
+Every Zone's Drive is the plain one until its own ticket dresses it ([#329](https://github.com/artsaraiva/dioramania/issues/329) to [#336](https://github.com/artsaraiva/dioramania/issues/336)): a concrete crossover 4.5 m wide from the kerbstone line to 4.5 m in, where the kerb is dropped; and at the back of the pavement, 2.2 m in, two steel posts 1.3 m tall with an accordion gate folded open against the left one, Block-zoom furniture as the Kerbside's is.
+
+Nothing stands on its ground, which the scene check holds:
+- the Kerbside's planters, bollards and benches keep 1.1 m off it, as they keep off the ground a Zone claimed;
+- a terraced house, a shop or a low-density house whose lot is on it is drawn as it was and left empty, so that no other lot changes, and a scene that would take that lot takes another;
+- the larger buildings, towers, offices, sheds and courtyard blocks, shrink off it as they do off a landmark's ground;
+- a meadow's beds, trees, pavilion and details, an allotment plot, a field's rows, a farmyard and the scenes keep off it, and a fence or a border opens over it.
+
+What else moves: the Kerbside's furniture after a Drive along the kerb, laid in turn as the walk goes, and on a few Blocks a scene that leaves the Drive's lot, which redraws the plans of the lots between.
+
 ## Amended by [#195](https://github.com/artsaraiva/dioramania/issues/195) (2026-11-20)
 
 The Kerbside, on every Tile: after its walk, a run of pavement still bare as the scene check reads it takes a pair of bollards at its free point nearest its middle, at the walk's depth or else by the kerb. Bare means: where the kerb faces a Road, with nothing standing on the ground within 3.6 m and no bay at the kerb, for more than 11 of the check's points, about 11 m.
@@ -225,7 +242,7 @@ That rule is why the park's deck is wood rather than shrine vermilion, why the c
 | --- | --- |
 | Walls of houses | `#fdeed6` `#ffd7b6` `#e0f2d4` `#cbebfc` `#fbe3a2` `#fbd2dd` `#e5dafb` `#fff7e8` `#c0e9e0` |
 | Roofs | brick `#d56454`, teal slate `#4d7d9c`, teal `#5aa69b`, tan `#d09c53`, violet `#8b7dbf`, persimmon `#ea8548` |
-| Kerbside ([#175](https://github.com/artsaraiva/dioramania/issues/175), on every Tile since [#176](https://github.com/artsaraiva/dioramania/issues/176)) | the pavement `#f1ede5` under the pattern's paving joints; kerbstone line `#cbc3b5`; tactile strips `#f2c744`; guard rails `#f4f6f8`; convex mirrors `#d8e6ee` on poles and rims `#f0b43c`; tree pits `#8a7560` in grates `#8c949e`; drain grates `#9aa0a8`; planters `#d9d3c7` of leaves `#5fbc51` `#7bcd5d` `#6bc357`; bollards `#9aa3ad` capped `#f4f6f8`; benches as the green details'. On the plate, manholes `#b7bcc4` in rims `#ccd0d6` and patches `#bcc0c7`, 4.2%, 3.3% and 2.6% of the plate's lightness (OKLab) from `#c3c7ce`; street lights' heads the lamps' bulb on arms `#6f7986`. Pools under a lamp `#ffbe6a` and under a street light `#ffd08f`, as on a shops Tile |
+| Kerbside ([#175](https://github.com/artsaraiva/dioramania/issues/175), on every Tile since [#176](https://github.com/artsaraiva/dioramania/issues/176)) | the pavement `#f1ede5` under the pattern's paving joints; kerbstone line `#cbc3b5`; tactile strips `#f2c744`; guard rails `#f4f6f8`; convex mirrors `#d8e6ee` on poles and rims `#f0b43c`; tree pits `#8a7560` in grates `#8c949e`; drain grates `#9aa0a8`; planters `#d9d3c7` of leaves `#5fbc51` `#7bcd5d` `#6bc357`; bollards `#9aa3ad` capped `#f4f6f8`; benches as the green details'. The plain Drive's crossover `#d6d1c7` and its gate's steel `#7a838e` ([#327](https://github.com/artsaraiva/dioramania/issues/327)). On the plate, manholes `#b7bcc4` in rims `#ccd0d6` and patches `#bcc0c7`, 4.2%, 3.3% and 2.6% of the plate's lightness (OKLab) from `#c3c7ce`; street lights' heads the lamps' bulb on arms `#6f7986`. Pools under a lamp `#ffbe6a` and under a street light `#ffd08f`, as on a shops Tile |
 | Vehicle skins ([#176](https://github.com/artsaraiva/dioramania/issues/176)) | paints from the cars' colours: hatchbacks (32% of cars) and kei cars (28%) in any of them; taxis (12%) yellow `#ffc52d`, two in three, or mint `#64cb9f`; vans (15%) white `#ffffff` twice as often as pale grey `#e9eef2`, yellow or turquoise `#009dcb`; kei trucks (13%) white twice as often as pale grey or mint. Every skin's tyres `#2f3440`, windscreen and glass band the cars' dark glass `#41566c`; a kei truck's chassis and the guard behind its cab `#4a525c`, a van's bumper `#c4ccd4`; lamps by day, a pale lens `#f4efe0` at the front and a deep red `#a84a52` at the back (17° of hue from the hot red-orange at 55% of its chroma), and a taxi's roof lamp the bulb's cream `#fff4dc`. Lit at night, unlit by the scene's light: head lamps `#fff6d8` and tail lamps `#ff3030` as before, a taxi's roof lamp `#ffd890` |
 | Walkers ([#176](https://github.com/artsaraiva/dioramania/issues/176)) | skin `#f1d1b5`, hair `#3a3330`; shoppers (four walkers in ten) the shops' ([#175](https://github.com/artsaraiva/dioramania/issues/175)), legs `#3a4252` and bags `#f4ead2`, in coats of the walkers' shirts' colours; schoolchildren (three in ten) in shorts `#3a4252`, a white shirt `#fbf8f2` and a yellow hat `#f6d36a`, a satchel `#5a3f34` on the back; office workers (three in ten) in trousers `#3a4252`, a jacket `#4a5262` over a white shirt `#fbf8f2`, with a briefcase `#5a3f34` |
 | Leaves | `#7bcd5d` `#5fbc51` `#92d76e` `#6bc357` `#85cf61` |

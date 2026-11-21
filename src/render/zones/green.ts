@@ -3,6 +3,7 @@ import { mulberry32 } from '../../sim/demand'
 import { middle, polyline, type Polyline, type Vec } from '../../sim/geometry'
 import { area, KERB } from '../blocks'
 import { WIND } from '../day'
+import { driveCorners } from '../drive'
 import { inside } from '../field'
 import { BENCH, CREAM, SHAPES, spot, to, type Kit, type TreeKind } from '../kit'
 import { clearOf, GROW, overlay, scatter, site } from '../landmarks'
@@ -15,6 +16,7 @@ import {
   corners,
   near,
   nearPath,
+  onDrive,
   runs,
   stands,
   waysIn,
@@ -193,8 +195,11 @@ function meadow(g: ZoneGround) {
   const draw = mulberry32(spot(mid.x, mid.y) ^ 0x182a)
   const scenes = meadowScenes(g, draw, trees, beds)
   const stream = meadowStream(g, draw, scenes)
-  /** Whether what would stand `r` m round `p` gives way to a scene or the stream. */
-  const gone = (p: Vec, r: number) => scenes.some((s) => near(s.ground, p.x, p.y, r)) || (!!stream && nearPath(stream, p.x, p.y, SHORE + r))
+  /** Whether what would stand `r` m round `p` gives way to a scene, the stream or the Drive (#327). */
+  const gone = (p: Vec, r: number) =>
+    scenes.some((s) => near(s.ground, p.x, p.y, r)) ||
+    (!!stream && nearPath(stream, p.x, p.y, SHORE + r)) ||
+    (!!g.drive && near(g.drive, p.x, p.y, r))
   const reach = (b: Bed) => Math.max(b.w, b.d) / 2 + 0.4
   const standing = trees.filter((t) => !gone(t.p, 1.2))
   const kept = beds.filter((b) => !gone(b.p, reach(b)))
@@ -218,7 +223,11 @@ function meadow(g: ZoneGround) {
   // are built, so that the details keep clear of them at every Stage (#152). The pavilion keeps off the beds drawn with
   // it, the scenes and the stream.
   const planted = trees.map((t) => t.p)
-  const barred = [...scenes.flatMap((s) => [s.ground, ...corners(s.ground, 0)]), ...(stream ?? [])]
+  const barred = [
+    ...scenes.flatMap((s) => [s.ground, ...corners(s.ground, 0)]),
+    ...(stream ?? []),
+    ...(g.drive ? driveCorners(g.drive) : []),
+  ]
   const late = (range: (a: number, b: number) => number) => {
     const more = scatter({ range }, field, block, 3, 4, Infinity, 7, [...kerbsideTrees, ...beds.map((b) => b.p), ...planted]).map((p) => ({
       p,
@@ -444,6 +453,7 @@ function meadowDetails(
     kerbsideTrees.every((t) => Math.hypot(t.x - p.x, t.y - p.y) >= 3.4) &&
     all.every((b) => Math.abs(b.p.x - p.x) > b.w / 2 + 1.6 || Math.abs(b.p.y - p.y) > b.d / 2 + 1.6) &&
     (!pavilion || Math.hypot(pavilion.x - p.x, pavilion.y - p.y) >= 5.5) &&
+    kit.unclaimed(p.x, p.y, 0, 0, 0, 2, ['drive']) &&
     off(p, pad)
   const taken: Vec[] = [] // benches, blankets, the log pile and the hives, which the rest keep off
   let lot = DETAIL
@@ -706,16 +716,18 @@ function allotments(g: ZoneGround) {
   kit.brick('ground', mid.x, mid.y, KERB)
   const ground = KERB + 0.12
   const { w, d, path } = ALLOTMENT
-  const plots: Plot[] = []
+  const drawn: Plot[] = []
   for (let x = block.x0 + 3 + w / 2; x + w / 2 <= block.x1 - 3; x += w + path) {
     for (let y = block.y0 + 3 + d / 2; y + d / 2 <= block.y1 - 3; y += d + path) {
       const edges = [-1, 1].flatMap((i) => [-1, 1].map((j) => field.sample(x + (i * w) / 2, y + (j * d) / 2)))
       if (Math.min(...edges) < 1.8 || !inside(block.loop, x, y) || !clearOf(kerbsideTrees, x, y, w, d, 0.8)) continue
       // Its roll, and the seed of its own stream, which `staged` would draw here.
       const [roll, seed] = [kit.range(0, 1), (kit.range(0, 1) * 4294967296) >>> 0]
-      plots.push({ x, y, roll, seed, lot: plots.length })
+      drawn.push({ x, y, roll, seed, lot: drawn.length })
     }
   }
+  // A plot on the Drive (#327) is drawn as it was and left as gravel, so that no other plot changes.
+  const plots = drawn.filter((p) => !onDrive(g, { x: p.x, y: p.y, w, d, ry: 0 }))
   // To the Finish, on a stream of the Block's own: the fence and its gate, the scenes' plots, and the yard's, by the gate.
   const draw = mulberry32(spot(mid.x, mid.y) ^ 0xa110)
   const gate = fence(g, ground, draw)

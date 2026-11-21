@@ -6,7 +6,7 @@ import { AIRCON, CREAM, FRONTAGE, type Kit, type Look as KitLook, pale, POOL, SH
 import { GROW } from '../landmarks'
 import { BOARD, cafeTable, menuBoard, STALL, WOOD } from '../props'
 import { planter } from '../kerbside'
-import { besideRow, rows, stands, turned, walled, yards, type Look, type RowLot, type ZoneGround } from './ground'
+import { besideRow, onDrive, rows, stands, turned, walled, yards, type Look, type RowLot, type ZoneGround } from './ground'
 import { PATTERN } from '../pattern'
 import type { Stage } from '../../game/game'
 
@@ -87,17 +87,20 @@ function shops(g: ZoneGround) {
     const scene = scenes.get(i)
     // The end of its front its door is at, drawn from where it stands: the vending machines stand at the other.
     const door: 1 | -1 = mulberry32(spot(l.x, l.y))() < 0.5 ? -1 : 1
-    if (scene?.kind === 'stall') {
-      kit.scene('stall', () => kit.staged((stage) => stallCourt(g, l, stage, scene.from, paving)))
-      continue
-    }
-    const plan = { front: FRONT.cloths[front], form, noodle, door, onRoad: l.onRoad }
-    kit.staged((stage) => shop(kit, l.x, l.y, KERB, l.w, l.d, l.ry, { ...plan, stage, storeys: SHOP_STOREYS(storeys, stage) }))
-    const paved = turned(l.x, l.y, l.ry, 0, l.d / 2 + SHOP_FINISH.paved / 2)
-    kit.from(2, () => kit.paving(paved.x, paved.y, KERB, l.w, SHOP_FINISH.paved, l.ry, paving), spot(l.x, l.y) + 2)
-    if (scene) sceneFront(g, l, door, scene)
-    else if (l.onRoad) shopFront(g, l, door)
-    else seamFront(g, l, door)
+    // A lot on the Drive (#327) is drawn as it was and left empty, so that no other lot changes.
+    kit.muted(
+      () => {
+        if (scene?.kind === 'stall') return kit.scene('stall', () => kit.staged((stage) => stallCourt(g, l, stage, scene.from, paving)))
+        const plan = { front: FRONT.cloths[front], form, noodle, door, onRoad: l.onRoad }
+        kit.staged((stage) => shop(kit, l.x, l.y, KERB, l.w, l.d, l.ry, { ...plan, stage, storeys: SHOP_STOREYS(storeys, stage) }))
+        const paved = turned(l.x, l.y, l.ry, 0, l.d / 2 + SHOP_FINISH.paved / 2)
+        kit.from(2, () => kit.paving(paved.x, paved.y, KERB, l.w, SHOP_FINISH.paved, l.ry, paving), spot(l.x, l.y) + 2)
+        if (scene) sceneFront(g, l, door, scene)
+        else if (l.onRoad) shopFront(g, l, door)
+        else seamFront(g, l, door)
+      },
+      onDrive(g, l),
+    )
   }
   kit.lot(-1)
   // Each lot's ground and what stands on its walls, once the pavement before its front is laid (#198); and that pavement
@@ -179,9 +182,11 @@ function backYard(g: ZoneGround, lots: RowLot[]) {
  */
 function sceneLots(g: ZoneGround, lots: RowLot[], draw: () => number): Map<number, { kind: ShopScene; from: number }> {
   const scenes = new Map<number, { kind: ShopScene; from: number }>()
-  // On lots facing a Road; or on any, on a Block whose fronts all face the seam with the next Tile (#193).
-  const facing = lots.flatMap((l, i) => (l.onRoad ? [i] : []))
-  const road = facing.length ? facing : lots.map((_, i) => i)
+  // On lots facing a Road; or on any, on a Block whose fronts all face the seam with the next Tile (#193). None on the
+  // Drive, whose lot is left empty (#327).
+  const clear = lots.flatMap((l, i) => (onDrive(g, l) ? [] : [i]))
+  const facing = clear.filter((i) => lots[i].onRoad)
+  const road = facing.length ? facing : clear
   const widest = Math.max(0, ...road.map((i) => lots[i].w))
   const fit = road.filter((i) => lots[i].w >= Math.min(SHOP_FINISH.wide, widest))
   const kinds = [...SHOP_FINISH.scenes]
@@ -195,7 +200,7 @@ function sceneLots(g: ZoneGround, lots: RowLot[], draw: () => number): Map<numbe
   scenes.set(fit[at], { kind: first, from: 2 })
   // The second on a lot wide enough not beside the first; or else any on a Road not beside it, or any at all (#193).
   const apart = (pool: number[]) => pool.filter((i) => Math.abs(i - fit[at]) > 1)
-  const rest = [apart(fit), apart(road), apart(lots.map((_, i) => i))].find((pool) => pool.length) ?? []
+  const rest = [apart(fit), apart(road), apart(clear)].find((pool) => pool.length) ?? []
   if (area(g.block.loop) < SHOP_FINISH.second || !rest.length) return scenes
   const lot = rest[Math.floor(other * rest.length)]
   if (!long(lot)) second = 'stall'
