@@ -118,7 +118,7 @@ export function createView(
   let roads = createRoads(sim.net, sim.spec)
   const signals = createSignals()
   const cars = createCars(sim.net)
-  const walkers = createWalkers()
+  const walkers = createWalkers(ground.scenery.seed)
   walkers.add(sim.net, field, pieces)
   const emotion = createJamEmotion()
   const tools = createTools()
