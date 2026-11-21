@@ -18,7 +18,8 @@
 // `npm run shots -- <zone> --stages <stage> --block=x,y`, adding `,m` for more metres of road across the shot.
 //
 // LOOK=lowpoly in the environment builds the low-poly look (src/render/look.ts, #276), as `?look=lowpoly` does on the
-// page: `LOOK=lowpoly npm run check:scene -- shops`.
+// page: `LOOK=lowpoly npm run check:scene -- shops`. A wall whose pattern drew windows is then a plain wall, which the
+// blank-wall rule reads, unless panes of the windows built as boxes stand on it (#279).
 import { execFileSync } from 'node:child_process'
 import { cpSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'

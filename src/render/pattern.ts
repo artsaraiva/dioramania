@@ -139,6 +139,24 @@ const WINDOW_LIGHT = '#ffc78a' // as the kit's glass glows
  */
 const CURTAIN = { sky: '#e9f4fb', foot: 0.06, third: 0.12, tone: 0.07, lit: [0.45, 0.85], glass: '#9cc7df', least: 0.35, dark: 0.03 }
 
+/**
+ * A pane of a curtain wall as the shader below draws it, for the low-poly look, which builds it as a box (#279): the
+ * wall's `paint` paled toward the sky for the third of the wall it stands in (0 to 2) and toned (0 darker, 1 as it is,
+ * 2 paler); and how brightly it lights, on a lit floor by its tone and dimmer for darker glass, but never below
+ * `CURTAIN.least` of it, or dimly on a dark floor.
+ * ponytail: a twin of the shader's curtain glass, kept beside it; it goes with the surface pattern (#281).
+ */
+export function curtainGlass(paint: THREE.ColorRepresentation = CURTAIN.glass, third: number, tone: number, lit: boolean) {
+  const wall = new THREE.Color(paint)
+  const colour = wall
+    .clone()
+    .lerp(new THREE.Color(CURTAIN.sky), CURTAIN.foot + CURTAIN.third * third)
+    .multiplyScalar(1 + CURTAIN.tone * (tone - 1))
+  const dim = Math.min(1, (wall.g / new THREE.Color(CURTAIN.glass).g) ** 2)
+  const level = CURTAIN.lit[0] + ((CURTAIN.lit[1] - CURTAIN.lit[0]) * (tone + 0.5)) / 3 // the middle of its tone's third
+  return { colour, glow: lit ? level * THREE.MathUtils.lerp(CURTAIN.least, 1, dim) : CURTAIN.dark }
+}
+
 /** The faces of a box in its own frame (its front -z, as the kit's shapes face) and the pattern each wears; m a bay and a storey take. */
 export interface Cladding {
   top?: Pattern

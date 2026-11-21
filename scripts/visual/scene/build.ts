@@ -258,7 +258,12 @@ export function buildReport(ask: Ask): Report {
     const first = things.length
     const scenesFrom = scenes.length
     for (const s of built.scenes ?? []) scenes.push({ kind: s.kind, tile: '', block, things: [] })
-    const named = built.parts.map((p) => ({ geo: p.geometry, material: materialName(materials, p.material), brick: p.brick }))
+    const named = built.parts.map((p) => ({
+      geo: p.geometry,
+      material: materialName(materials, p.material),
+      brick: p.brick,
+      window: p.window,
+    }))
     const parts = built.bricks.map(() => [] as typeof named)
     for (const p of named) parts[p.brick].push(p)
     built.bricks.forEach((b, i) => {
