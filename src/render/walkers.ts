@@ -5,15 +5,38 @@ import { Walkers, type Kind, type Walker } from '../walkers/walkers'
 import { KERB } from './blocks'
 import { inside, type Field } from './field'
 import { LOW_POLY } from './look'
-import { shopper } from './movers'
 import { merged, part, takesPaint, tint } from './shapes'
 
 const INSET = 1.6 // m in from the kerb: the pavement's centre line
 // The cars' colours, a walker's paint: every walker wears one, on whatever of its model takes paint (`model`).
 const SHIRTS = ['#db6982', '#009dcb', '#ffc52d', '#ffffff', '#64cb9f', '#bc9ef2', '#2f3440', '#ff9cbb'].map((c) => new THREE.Color(c))
-// What a Walker wears, and where in its hop it is, from bits of its own seed: the same Walker looks the same every time.
+// What a Walker wears, and where in its stride it is, from bits of its own seed: the same Walker looks the same every time.
 const paintOf = (walker: Walker) => SHIRTS[walker.seed % SHIRTS.length]
 const phaseOf = (walker: Walker) => ((walker.seed >>> 3) % 1000) / 100
+
+const [BODY, LEFT_LEG, RIGHT_LEG, LEFT_ARM, RIGHT_ARM, HEAD] = [0, 1, 2, 3, 4, 5]
+const SWING = 0.62 // how far a leg swings either way, in radians
+
+/** Mark `g` as part of `limb`, which turns about the point `(px, py)` of the figure's side view (x ahead, y up); a head turns about the upright through `px`. */
+const of = (g: THREE.BufferGeometry, limb: number, px = 0, py = 0) => {
+  const joint = new Float32Array(g.attributes.position.count * 3)
+  for (let i = 0; i < joint.length; i += 3) joint.set([limb, px, py], i)
+  return g.setAttribute('joint', new THREE.BufferAttribute(joint, 3))
+}
+/** Two legs `hip` m long, each `apart` m off the middle. A figure faces +x, so its right is +z. */
+const legs = (hip: number, colour: string, wide: number, apart: number, deep: number) => [
+  of(part(wide, hip, deep, 0, 0, -apart, colour), LEFT_LEG, 0, hip),
+  of(part(wide, hip, deep, 0, 0, apart, colour), RIGHT_LEG, 0, hip),
+]
+/** Two arms hanging `len` m from the `shoulder`, `out` m off the middle: a sleeve and a hand each. */
+const arms = (shoulder: number, len: number, out: number, sleeve: string) =>
+  [LEFT_ARM, RIGHT_ARM].flatMap((limb) => {
+    const z = (limb === LEFT_ARM ? -1 : 1) * out
+    return [
+      of(part(0.17, len - 0.14, 0.14, 0, shoulder - len + 0.14, z, sleeve), limb, 0, shoulder - 0.06),
+      of(part(0.15, 0.14, 0.12, 0, shoulder - len, z, SKIN_TONE), limb, 0, shoulder - 0.06),
+    ]
+  })
 
 /**
  * The parts merged into one model, facing +x, its white parts taking its instance's paint.
@@ -29,44 +52,107 @@ const model = (parts: THREE.BufferGeometry[]) => {
   return g.setAttribute('painted', new THREE.BufferAttribute(share, 1))
 }
 
-// Each kind's model (#176), drawn a little large as the walkers always were. A shopper is the shops' (#175), in a coat
-// in its paint; a schoolchild in a white shirt and navy shorts under a yellow hat, a satchel on its back; an office
-// worker in a dark suit with a white shirt and a briefcase.
+// Each kind's jointed figure (#176, #287), drawn a little large as the walkers always were, and its leg's length, `hip`.
+// A shopper in a coat in its paint with a bag in its left hand; a schoolchild in a white shirt and navy shorts under a
+// yellow hat, a satchel on its back; an office worker in a dark suit with a white shirt and a briefcase in its right hand.
 const SKIN_TONE = '#f1d1b5'
 const HAIR = '#3a3330'
-const MODELS: Record<Kind, () => THREE.BufferGeometry> = {
-  shopper: () => model([shopper()]),
-  schoolchild: () =>
-    model([
-      part(0.22, 0.5, 0.34, 0, 0, 0, '#3a4252'), // legs and shorts
-      part(0.3, 0.52, 0.48, 0, 0.5, 0, '#fbf8f2'), // the shirt
-      part(0.26, 0.4, 0.42, -0.24, 0.56, 0, '#5a3f34'), // the satchel
-      part(0.3, 0.3, 0.3, 0.02, 1.02, 0, SKIN_TONE),
-      tint(new THREE.CylinderGeometry(0.24, 0.27, 0.16, 10).translate(0.02, 1.38, 0), '#f6d36a'), // the hat
-      tint(new THREE.CylinderGeometry(0.34, 0.34, 0.03, 10).translate(0.02, 1.31, 0), '#f6d36a'), // its brim
-    ]),
-  worker: () =>
-    model([
-      part(0.26, 0.84, 0.38, 0, 0, 0, '#3a4252'), // trousers
-      part(0.36, 0.76, 0.6, 0, 0.82, 0, '#4a5262'), // the jacket
-      part(0.05, 0.42, 0.16, 0.18, 1.14, 0, '#fbf8f2'), // the shirt at its front
-      part(0.32, 0.32, 0.32, 0.02, 1.58, 0, SKIN_TONE),
-      part(0.34, 0.1, 0.34, -0.01, 1.86, 0, HAIR),
-      part(0.42, 0.3, 0.1, 0.02, 0.5, 0.38, '#5a3f34'), // the briefcase
-    ]),
+const NAVY = '#3a4252'
+const FIGURES: Record<Kind, { hip: number; parts: (hip: number) => THREE.BufferGeometry[] }> = {
+  shopper: {
+    hip: 0.7,
+    parts: (hip) => [
+      ...legs(hip, NAVY, 0.22, 0.1, 0.16),
+      of(part(0.34, 0.86, 0.5, 0, 0.56, 0, '#ffffff'), BODY),
+      ...arms(1.4, 0.7, 0.32, '#ffffff'),
+      of(part(0.26, 0.32, 0.12, 0.02, 0.4, -0.32, '#f6d36a'), LEFT_ARM, 0, 1.34), // the bag
+      of(part(0.3, 0.3, 0.3, 0.02, 1.44, 0, SKIN_TONE), HEAD, 0.02),
+      of(part(0.33, 0.12, 0.33, -0.01, 1.7, 0, HAIR), HEAD, 0.02),
+    ],
+  },
+  schoolchild: {
+    hip: 0.5,
+    parts: (hip) => [
+      ...legs(hip, NAVY, 0.2, 0.09, 0.15),
+      of(part(0.3, 0.52, 0.46, 0, 0.5, 0, '#fbf8f2'), BODY), // the shirt
+      of(part(0.26, 0.4, 0.42, -0.24, 0.56, 0, '#5a3f34'), BODY), // the satchel
+      ...arms(1.0, 0.46, 0.29, '#fbf8f2'),
+      of(part(0.3, 0.3, 0.3, 0.02, 1.02, 0, SKIN_TONE), HEAD, 0.02),
+      of(tint(new THREE.CylinderGeometry(0.24, 0.27, 0.16, 10).translate(0.02, 1.38, 0), '#f6d36a'), HEAD, 0.02), // the hat
+      of(tint(new THREE.CylinderGeometry(0.34, 0.34, 0.03, 10).translate(0.02, 1.31, 0), '#f6d36a'), HEAD, 0.02), // its brim
+    ],
+  },
+  worker: {
+    hip: 0.84,
+    parts: (hip) => [
+      ...legs(hip, NAVY, 0.24, 0.1, 0.17),
+      of(part(0.36, 0.76, 0.52, 0, 0.82, 0, '#4a5262'), BODY), // the jacket
+      of(part(0.05, 0.42, 0.16, 0.18, 1.14, 0, '#fbf8f2'), BODY), // the shirt at its front
+      ...arms(1.56, 0.74, 0.33, '#4a5262'),
+      of(part(0.42, 0.3, 0.1, 0.02, 0.52, 0.33, '#5a3f34'), RIGHT_ARM, 0, 1.5), // the briefcase
+      of(part(0.32, 0.32, 0.32, 0.02, 1.58, 0, SKIN_TONE), HEAD, 0.02),
+      of(part(0.34, 0.1, 0.34, -0.01, 1.86, 0, HAIR), HEAD, 0.02),
+    ],
+  },
 }
-const ORDER = Object.keys(MODELS) as Kind[]
+const ORDER = Object.keys(FIGURES) as Kind[]
+// The ground a kind covers in one whole stride, both steps, so that its feet do not slide.
+const strideOf = (kind: Kind) => 4 * FIGURES[kind].hip * Math.sin(SWING)
+
+/**
+ * Have a material move each vertex as its limb and its instance's `pose` say: `pose.x` is where in its stride it is
+ * (radians), `pose.y` how far it swings (0 standing, 1 walking; below 0, how far it is sat down), `pose.z` how far its
+ * right arm is raised (radians) and `pose.w` how far its head is turned (radians).
+ */
+const jointed = (shader: THREE.WebGLProgramParametersWithUniforms) => {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute vec3 joint;\nattribute vec4 pose;')
+    .replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+{
+  float limb = joint.x;
+  float walk = max(0.0, pose.y);
+  float sat = max(0.0, -pose.y);
+  float swing = sin(pose.x) * walk * ${SWING.toFixed(2)};
+  float raised = min(1.0, pose.z);
+  float turn = 0.0;
+  if (abs(limb - ${LEFT_LEG}.0) < 0.5) turn = swing + sat * 1.45;
+  else if (abs(limb - ${RIGHT_LEG}.0) < 0.5) turn = -swing + sat * 1.45;
+  else if (abs(limb - ${LEFT_ARM}.0) < 0.5) turn = -swing * 0.8 + sat * 0.45;
+  else if (abs(limb - ${RIGHT_ARM}.0) < 0.5) turn = (swing * 0.8 + sat * 0.45) * (1.0 - raised) + pose.z;
+  if (abs(limb - ${BODY}.0) > 0.5 && abs(limb - ${HEAD}.0) > 0.5) {
+    vec2 p = transformed.xy - joint.yz;
+    float c = cos(turn), s = sin(turn);
+    transformed.xy = joint.yz + vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+  } else if (abs(limb - ${HEAD}.0) < 0.5) {
+    vec2 p = vec2(transformed.x - joint.y, transformed.z);
+    float c = cos(pose.w), s = sin(pose.w);
+    transformed.x = joint.y + c * p.x + s * p.y;
+    transformed.z = c * p.y - s * p.x;
+  }
+  // A walker leans into its stride, and sinks a little as its legs spread, so that its feet stay on the ground.
+  transformed.x += (transformed.y - 0.4) * 0.07 * walk;
+  transformed.y += (abs(cos(pose.x)) - 1.0) * 0.05 * walk;
+}`,
+    )
+}
 
 /**
  * The City's Walkers on the pavement, one instanced mesh per kind (#176), as `../walkers/walkers` has them: who each
- * is, and where they walk, comes from there, seeded `seed`, the City's. Each faces the way it walks, with a little hop
- * per step.
+ * is, and where they walk, comes from there, seeded `seed`, the City's. Each faces the way it walks, its legs and arms
+ * swinging in step with the ground it covers (#287); its shadow moves with them.
  */
 export function createWalkers(seed: number) {
   const group = new THREE.Group()
-  const models = new Map(ORDER.map((k) => [k, MODELS[k]()]))
+  const models = new Map(ORDER.map((k) => [k, model(FIGURES[k].parts(FIGURES[k].hip))]))
   const clothes = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: LOW_POLY })
-  clothes.onBeforeCompile = takesPaint
+  clothes.onBeforeCompile = (shader) => {
+    takesPaint(shader)
+    jointed(shader)
+  }
+  const shadow = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking })
+  shadow.onBeforeCompile = jointed
   const walkers = new Walkers(seed)
   let meshes = new Map<Kind, THREE.InstancedMesh>()
   const [m, q, at, up, one] = [
@@ -83,13 +169,17 @@ export function createWalkers(seed: number) {
     for (const mesh of meshes.values()) {
       group.remove(mesh)
       mesh.dispose()
+      mesh.geometry.dispose()
     }
     meshes = new Map()
     for (const kind of ORDER) {
       const mine = walkers.all.filter((w) => w.kind === kind)
-      const mesh = new THREE.InstancedMesh(models.get(kind)!, clothes, mine.length)
+      // Its own copy of the model, carrying each walker's pose.
+      const pose = new THREE.InstancedBufferAttribute(new Float32Array(4 * Math.max(1, mine.length)), 4)
+      const mesh = new THREE.InstancedMesh(models.get(kind)!.clone().setAttribute('pose', pose), clothes, mine.length)
       mesh.name = `walker ${kind}`
       mesh.castShadow = true
+      mesh.customDepthMaterial = shadow
       mesh.frustumCulled = false // instances move; the mesh's own bounds mean nothing
       mine.forEach((walker, i) => mesh.setColorAt(i, paintOf(walker)))
       meshes.set(kind, mesh)
@@ -124,13 +214,22 @@ export function createWalkers(seed: number) {
       const index = new Map<Kind, number>(ORDER.map((k) => [k, 0]))
       for (const walker of walkers.all) {
         const p = pointAt(walker.line, walker.s)
-        at.set(p.x, KERB + Math.abs(Math.sin((t + phaseOf(walker)) * 9)) * 0.12, -p.y) // a little hop per step
+        at.set(p.x, KERB, -p.y)
         q.setFromAxisAngle(up, p.heading + (walker.speed < 0 ? Math.PI : 0)) // facing the way it walks
         const i = index.get(walker.kind)!
         index.set(walker.kind, i + 1)
-        meshes.get(walker.kind)!.setMatrixAt(i, m.compose(at, q, one))
+        const mesh = meshes.get(walker.kind)!
+        mesh.setMatrixAt(i, m.compose(at, q, one))
+        // One whole stride is 2π.
+        // ponytail: the ground a walker has covered is |speed| × t while every walker walks on at a steady speed; count
+        // it up frame by frame once walkers stop (#288), or the stride jumps as they walk on.
+        const stride = (phaseOf(walker) + (Math.abs(walker.speed) * t * Math.PI * 2) / strideOf(walker.kind)) % (Math.PI * 2)
+        ;(mesh.geometry.attributes.pose as THREE.InstancedBufferAttribute).setXYZW(i, stride, 1, 0, 0)
       }
-      for (const mesh of meshes.values()) mesh.instanceMatrix.needsUpdate = true
+      for (const mesh of meshes.values()) {
+        mesh.instanceMatrix.needsUpdate = true
+        mesh.geometry.attributes.pose.needsUpdate = true
+      }
     },
   }
 }
