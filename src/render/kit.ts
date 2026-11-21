@@ -40,6 +40,7 @@ import {
   windowed,
   wrapWindows,
 } from './wall-windows'
+import type { Place } from '../walkers/walkers'
 
 const TAU = Math.PI * 2
 // Low poly, lit windows and lamps are about a quarter dimmer, under the blend's glow (`./blend`, #283).
@@ -687,7 +688,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   // What the scene check reads (#191): the ground laid to be kept clear, the scenes and the lots' building forms.
   const claims: Claim[] = []
   // Where a Walker could go: a door's step, a bench's seat (#288), each riding the next brick closed, as a claim does.
-  const places: { kind: 'door' | 'bench'; x: number; y: number; ry: number; h?: number; brick: number }[] = []
+  const places: (Place & { h?: number; brick: number })[] = []
   const scenes: Scene[] = []
   const forms: Form[] = []
   let scene = -1 // the scene the bricks closed from now on belong to

@@ -126,7 +126,12 @@ function wearAlike(geometries: THREE.BufferGeometry[]) {
   }
 }
 
-/** The convex hull of `points`, counter-clockwise (Andrew's monotone chain): two points make a segment, one a point. */
+/**
+ * The convex hull of `points`, counter-clockwise (Andrew's monotone chain): two points make a segment, one a point.
+ *
+ * ponytail: a part merged from pieces that make an L or a U also stands across the corner it holds, so a Place in that
+ * corner goes unused; hull its pieces one by one if that shows.
+ */
 function hull(points: Vec[]): Vec[] {
   const p = [...points].sort((a, b) => a.x - b.x || a.y - b.y).filter((v, i, a) => !i || v.x !== a[i - 1].x || v.y !== a[i - 1].y)
   if (p.length < 3) return p

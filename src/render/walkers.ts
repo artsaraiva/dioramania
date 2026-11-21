@@ -146,7 +146,7 @@ const jointed = (shader: THREE.WebGLProgramParametersWithUniforms) => {
  * The City's Walkers on the pavement, one instanced mesh per kind (#176), as `../walkers/walkers` has them: who each
  * is, where they walk and what they do comes from there, seeded `seed`, the City's. Each faces the way it walks, its
  * legs and arms swinging in step with the ground it covers (#287), and stops swinging as it stops (#288): it goes out
- * of sight in at a door, sits down on a bench, turns its head about, and talks with a hand beside the other of a two;
+ * of sight in at a door, sits down on a bench, turns its head about, and stopped, or sat beside the other of a two, talks with a hand;
  * its shadow moves with it.
  */
 export function createWalkers(seed: number) {
@@ -203,7 +203,7 @@ export function createWalkers(seed: number) {
     /**
      * Walkers on the pavement of the pieces of slab `pieces`, laid in `field`, and their ways to `places`, round
      * `obstacles` (see `Walkers.add`). Nobody can reach a roundabout's island.
-     * shortcut: the ways cost up to 18 ms a Tile (about 10 ms on average, M4 Pro), as does `refit`'s at a Stage-up, a
+     * ponytail: the ways cost up to 18 ms a Tile (about 10 ms on average, M4 Pro), as does `refit`'s at a Stage-up, a
      * dropped frame; work them out over frames if it shows.
      */
     add(net: Network, field: Field, pieces: Bounds[], places: readonly Place[] = [], obstacles: readonly Vec[][] = []) {
@@ -247,7 +247,7 @@ export function createWalkers(seed: number) {
         look.swing += ((moving ? 1 : 0) - look.swing) * ease
         look.sit += ((act === 'bench' ? 1 : 0) - look.sit) * ease
         look.size += ((act === 'door' ? 0 : 1) - look.size) * ease
-        const talking = (walker.doing === 'stop' || act === 'bench') && walker.side !== 0 && talks(walker) && look.size > 0.9
+        const talking = (walker.doing === 'stop' || (act === 'bench' && walker.side !== 0)) && talks(walker) && look.size > 0.9
         look.arm += ((talking ? 1.25 + Math.sin(t * 5 + phaseOf(walker)) * 0.3 : 0) - look.arm) * ease
         look.heading += Math.atan2(Math.sin(p.heading - look.heading), Math.cos(p.heading - look.heading)) * ease
         ;[look.x, look.y] = [p.x, p.y]

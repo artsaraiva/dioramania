@@ -126,6 +126,8 @@ function roll(w: Walker) {
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296
 }
+/** How long `w` strolls before choosing what to do next, s. */
+const strolling = (w: Walker) => 8 + roll(w) * 24
 
 const wrap = (s: number, length: number) => ((s % length) + length) % length
 /** `p` moved `side` m to the left of `heading`. */
@@ -199,6 +201,9 @@ function pathOf(line: Polyline, way: Way, side: number) {
  * The ways from the pavement `line` round the Block `loop` to those of `places` it reaches: each from the nearest
  * point of the pavement whose way keeps clear of `obstacles`, the outlines on the map of all that stands at a Walker's
  * height, and for two side by side if one does. A Place it has no clear way to, nobody goes to.
+ *
+ * ponytail: a way is the straight legs pavement, front, Place, so about one Place in ten with a pole or a tree before
+ * it goes unused; find a way round it (a few points off to each side) if a Block looks empty of people.
  */
 function waysOf(line: Polyline, loop: Vec[], places: readonly Place[], obstacles: readonly (readonly Vec[])[]) {
   const boxes = obstacles.map((o) => around([...o]))
@@ -333,7 +338,7 @@ export class Walkers {
         break
       }
       case 'stop':
-        if ((w.time -= dt) <= 0) Object.assign(w, { doing: 'stroll', time: 8 + roll(w) * 24 })
+        if ((w.time -= dt) <= 0) Object.assign(w, { doing: 'stroll', time: strolling(w) })
         break
       case 'go':
         if ((w.along += pace) < w.path!.length) break
@@ -346,7 +351,7 @@ export class Walkers {
         break
       case 'back':
         if ((w.along -= pace) > 0) break
-        Object.assign(w, { doing: 'stroll', way: undefined, path: undefined, along: 0, time: 8 + roll(w) * 24 })
+        Object.assign(w, { doing: 'stroll', way: undefined, path: undefined, along: 0, time: strolling(w) })
     }
   }
 
@@ -354,7 +359,7 @@ export class Walkers {
   private choose(w: Walker) {
     const r = roll(w)
     if (r >= 0.8) {
-      w.time = 8 + roll(w) * 24
+      w.time = strolling(w)
       return
     }
     const kind = r < 0.3 ? undefined : r < 0.6 ? 'door' : 'bench'

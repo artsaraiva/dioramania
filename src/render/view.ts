@@ -159,6 +159,8 @@ export function createView(
     }
     used.reveal.play(built, { plate() {}, done }, 'stage-up')
     movers.add(built, used.reveal)
+    // ponytail: the ways change as the Stage-up starts, so while it plays a Walker may pass a building going or step up
+    // to a door yet to come; keep what goes standing in the ways till `done` if it shows.
     walkers.refit([job.piece], built.places, built.obstacles)
     if (quietly) used.reveal.settle()
   }
