@@ -32,7 +32,7 @@ These test seams are pre-agreed with the user and form the complete list:
 
 Assert outcomes only: jammed, cleared, legal, refused, a price, yen, a Stage, who a Walker is, a log. Verify everything else (`src/render`, `src/ui`, visuals, feel, tuning) by running the game.
 
-Visual-style PR evidence comes from `scripts/visual/`: `npm run shots -- <zones>` for the Stage sheets, `npm run bench:visual -- <zones> --against origin/main` for the 1,000-car frame time. Usage heads each script.
+PR evidence is text: test and `npm run check:scene` output, and for a visual-style PR the 1,000-car frame time from `npm run bench:visual -- <zones> --against origin/main` (usage heads the script). A PR carries no screenshots or before-and-after images, even where a ticket's acceptance criteria ask for them: the user does not read them, and shooting them costs more than they are worth. Shoot (`npm run shots`) only when the user asks to see something.
 
 The rules of Finish that are facts about what was placed come from the scene check, `npm run check:scene -- <zones> --against origin/main`: a script outside `npm test`, whose usage heads `scripts/visual/check.mjs`. Sheets are for the look alone. The check also holds the Drives: every Block of a zoned Tile has exactly one, in the same place at every Stage, with nothing standing in it.
 
