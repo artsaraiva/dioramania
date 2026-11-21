@@ -526,7 +526,7 @@ Each Zone's own frame time is in its file (Block fill, above).
 
 Visuals are verified by running the game, not by tests.
 Each issue is done when its part matches the reference screenshots and the prototype side by side, and the frame budget still holds with 1,000 cars.
-Since [#175](https://github.com/artsaraiva/dioramania/issues/175) `npm run shots` shows every Zone at the three zooms of [#173](https://github.com/artsaraiva/dioramania/issues/173) (City, Tile and Block zoom) from four quarter-turns of the camera, at noon, dusk and night, a sheet per time and zoom, and `npm run bench:visual` takes `--views city,tile` and `--times noon,night`;
+Since [#175](https://github.com/artsaraiva/dioramania/issues/175) `npm run shots` shows every Zone at the three zooms of [#173](https://github.com/artsaraiva/dioramania/issues/173) (City, Tile and Block zoom) from four quarter-turns of the camera, at noon, dusk and night, a sheet per time and zoom, and `npm run bench:visual` takes `--views city,tile,block` and `--times noon,night`, and `--with` for a dev switch on one side alone ([#280](https://github.com/artsaraiva/dioramania/issues/280));
 both take `--query` for a dev switch such as `deeper`.
 The shops sheet is the reference every later Zone's sheet is held to.
 Since [#176](https://github.com/artsaraiva/dioramania/issues/176) both take `unzoned` for a City of unzoned Tiles.

@@ -229,8 +229,12 @@ What must change from the prototype before it is the game
 
 Surface pattern
 
-- The surface pattern is drawn at no cost in triangles; modelled windows cost triangles for every bay. The author of Neon Terrarium reports spending two thirds of that project on performance and drawing small detail as texture for that reason. The target has not been measured against the 1,000-car frame budget.
+- The surface pattern is drawn at no cost in triangles; modelled windows cost triangles for every bay. The author of Neon Terrarium reports spending two thirds of that project on performance and drawing small detail as texture for that reason.
 - Decision: measure first. If the target holds the frame budget at City zoom, the surface pattern is removed. If it does not, modelled detail is drawn from Tile zoom inward and the pattern stands in for it farther out, as Block-zoom props already fade.
+- Measured ([#280](https://github.com/artsaraiva/dioramania/issues/280)): the look misses the budget, 60 frames a second or 16.7 ms, at every zoom. With 1,000 cars on the 26-Tile City at Stage 3, noon, on the M4 Pro at 2× pixel density, every Zone takes 18.4 to 23.6 ms a frame with the look and 6.5 to 10 ms without it (`npm run bench:visual -- all,unzoned --with look=lowpoly --views city,tile,block`, the better of two rounds). The look costs 11 to 14 ms at City, Tile and Block zoom alike, and 9 to 11 ms on a City with no buildings at all.
+- What costs most is the blend: its passes drawing into multisampled pictures. The pass chain draws every pass into a 4× multisampled half-float picture the size of the canvas. On high-density at City zoom, the Zone with the most windows, in one round, the look takes 24.7 ms, 13.6 ms with the chain single-sampled, 12.5 ms with the shade, glow and lens all left out, and 9.6 ms with no blend. So the passes single-sampled cost about 2 ms, the multisampling with no passes about 2 ms, and the two together 10 to 14 ms. Leaving out one pass saves 2 to 6 ms, the shade most.
+- The windows cost 1 to 3 ms there: 1.5 M triangles, shadows counted. Without the blend the look, windows and all, takes 9.6 to 12.3 ms against the current look's 10.8 to 11.1, inside the budget at City zoom.
+- The answer departs from the decision above. The rule says the pattern stands farther out than Tile zoom, since the look misses at City zoom; but it took the windows to be what costs. Standing in for them would win back their 1 to 3 ms at City zoom only, and the look misses by 1.7 to 7 ms at every zoom, Block zoom included. So the surface pattern is removed, and the budget is the blend's to hold: the scene's own draw keeps its multisampling and the passes after it draw single-sampled. Removing the pattern rests on that being done before the look is the game's one look ([#281](https://github.com/artsaraiva/dioramania/issues/281)).
 
 Glossary changes
 
@@ -285,7 +289,7 @@ Rough spots in the prototype
 - The glow washed out lit windows before it was halved; the accepted values are untested at night on a large City.
 - With flat colour, low-density houses lost their windows until the wall-window path gave them boxes; any wall whose windows a Zone builds some other way was not checked.
 - The lights' lamps, the marker over a followed Walker and each lamp are separate draws: fine for three Tiles, not for a large City.
-- The target was run at 60 frames a second for two small views in headless Chrome early on, before the blend's later passes, Walkers, Signals and parking. Nothing was measured after that.
+- The target was run at 60 frames a second for two small views in headless Chrome early on, before the blend's later passes, Walkers, Signals and parking. In the game the look misses the frame budget, the blend's passes drawing multisampled most (#280, "Surface pattern" above).
 - The page's own panel, clicks and keys run only inside the artifact's canvas and were never tested; everything else was checked in a local headless render.
 - The whole prototype is one commit on its branch, `prototype-faceted-look`, pushed and never merged (#271).
 
