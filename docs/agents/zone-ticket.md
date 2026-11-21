@@ -15,7 +15,7 @@ The rules of Finish and the three zooms (City, Tile and Block zoom: `GLOSSARY.md
 7. **Review:** `/code-review` against `origin/main`, on both axes as Review (below) has them. Fix what it finds, rerun the check, and reshoot only what a fix changes.
 8. **Bench once:** `npm run bench:visual -- <zone> --against origin/main`, whole City and one Tile, noon and night. Under 12 ms.
 9. **Write** what the Zone builds, its colours and its frame time into the visual-style spec. List in one place every departure from a rule and every piece outside the ticket's menu, for the user to accept or drop.
-10. **Open a draft PR** (`/pr`, `Closes #<n>`). The user approves the sheets; then mark it ready.
+10. **Open a draft PR** (`/pr`, `Closes #<n>`), its evidence in text as `CLAUDE.md` has it; mark it ready when the user approves.
 
 ## What the check asserts, and what stays with the sheet
 

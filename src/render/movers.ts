@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import { mulberry32 } from '../sim/demand'
 import type { Polyline } from '../sim/geometry'
-import { DAY, WIND, WORK, type Glow } from './day'
+import { DAY } from '../sim/sim'
+import { WIND, WORK, type Glow } from './day'
 import { spot, type Fate } from './kit'
 import { LOW_POLY } from './look'
 import type { Build } from './scenery'
@@ -158,7 +159,7 @@ export interface Sway {
 
 /** The movers' share of the working day (`WORK`) left free. */
 const SLACK = 0.2
-/** Real seconds of work in a day. */
+/** Sim-seconds of work in a day. */
 const SHIFT = (WORK.to - WORK.from) * DAY
 // Per kind: m/s, how high it bobs (m) and how fast (rad/s) while it drives, its model, and how wide a strip of ground
 // its loop takes (m), which the street furniture keeps off (#176): none for one that works a wall or flies. One that
@@ -955,7 +956,7 @@ interface Entry {
 
 /**
  * The moving details of every build in the scene, one instanced mesh per kind. Where each mover is follows from the
- * work done, a clock that runs only through the working day and while the world runs, so a mover built again (by a
+ * work done, a clock that runs only through the working day and with the Sim's, so a mover built again (by a
  * Swap, a Rezoning or a Stage-up) carries on from where it was. A mover arrives with its brick in the build's reveal,
  * and leaves with its build. Each chimney smokes while the working day runs, once its brick stands, its puffs one
  * instanced mesh of soft spheres that fade as they rise. The pools of light (#174) are laid once, and moved only while
@@ -1397,18 +1398,19 @@ export function createMovers() {
     },
 
     /**
-     * `dt` is the real seconds since the last frame, 0 while paused, `time` the time of day (0–1) and `glow` what glows
-     * then: the movers work, the chimneys smoke and the washing hangs out only through the working day, and the beacons
-     * blink as the lamps glow.
+     * `dt` is the real seconds since the last frame, 0 while paused, `simDt` the sim-seconds since then, `time` the time
+     * of day (0–1) and `glow` what glows then: the movers work, the chimneys smoke and the washing hangs out only through
+     * the working day, and the beacons blink as the lamps glow. The movers work at the Sim's pace, so a day's work fits
+     * the day at every speed.
      */
-    update(dt: number, time: number, glow?: Glow) {
+    update(dt: number, simDt: number, time: number, glow?: Glow) {
       t += dt
       const was = working
       working = time >= WORK.from && time < WORK.to
       // At the end of the working day the day's work is done, so every mover stops at the end of its last stretch,
       // even when the time of day jumps there.
       if (was && !working) work = Math.ceil(work / SHIFT - 1e-6) * SHIFT
-      if (working) work += dt
+      if (working) work += simDt
       // A build that has played out keeps only what its Stage has.
       let changed = false
       for (const e of entries) {

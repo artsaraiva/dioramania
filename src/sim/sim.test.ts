@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { City, LAYOUTS, type Layout } from '../city/city'
 import { pointAt } from './geometry'
-import { DT, Sim, type Vehicle } from './sim'
+import { DAY, DT, Sim, type Vehicle } from './sim'
 import type { Change, DemandSpec, NetworkSpec, RoadAttributes } from './spec'
 import { CELL } from './tiles'
 
@@ -342,6 +342,16 @@ it('gives a City the same result every run of a seed', () => {
   const [a, b] = [0, 1].map(() => run(new Sim(cityOf(['crossroads', 0, 0, 0], ['roundabout', 0, 1, 0]), [], 3), 60))
   expect(b.flow).toBe(a.flow)
   expect(state(b)).toEqual(state(a))
+})
+
+it('gives a seed the same time of day at the same sim time every run: morning as it opens, noon a quarter-day on', () => {
+  const opened = () => new Sim(cityOf(['crossroads', 0, 0, 0], ['roundabout', 0, 1, 0]), [], 3)
+  const [a, b] = [opened(), opened()]
+  expect(a.timeOfDay).toBeCloseTo(0)
+  expect(b.timeOfDay).toBe(a.timeOfDay)
+  for (const sim of [a, b]) run(sim, DAY / 4)
+  expect(a.timeOfDay).toBeCloseTo(0.25)
+  expect(b.timeOfDay).toBe(a.timeOfDay)
 })
 
 it('keeps a Change made before a placement in force after it', () => {

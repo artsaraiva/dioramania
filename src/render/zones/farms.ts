@@ -728,7 +728,7 @@ const BARN = {
 }
 const WELL = { roof: '#6b5f58', bucket: '#8e979f' }
 const RUN = { wire: '#aab3ad', coop: '#d8b98b', roof: '#8a5a3c' }
-const { cylinder: CYLINDER, sphere: SPHERE } = SHAPES
+const { ball: BALL, cylinder: CYLINDER, sphere: SPHERE } = SHAPES
 
 /**
  * A farmstead in its yard at `yard`, whose frame is turned `ry` so that its front faces the fields (#184), on the earth
@@ -838,7 +838,7 @@ function barn(kit: Kit, x: number, y: number, h: number, ry: number, stage: numb
   const silo = (lx: number, ly: number, r: number, tall: number, k: number) => {
     const [sx, sy] = to(x, y, ry, lx, ly)
     kit.wrapped(CYLINDER, BARN.silo, sx, sy, h, r, tall, { kind: PATTERN.plates, bay: 2, storey: 1.2 }, seed + 4 + k)
-    kit.add(SPHERE, BARN.dome, sx, sy, h + tall, 0, r + 0.05, r * 0.72, r + 0.05)
+    kit.add(BALL, BARN.dome, sx, sy, h + tall, 0, r + 0.05, r * 0.72, r + 0.05)
     kit.add(kit.cuboid(0.4, tall - 0.3, 0.08), BARN.dome, ...to(sx, sy, ry, 0, r + 0.05), h + 0.3, ry)
   }
   if (stage > 1) silo(-7, 2, 1.9, 9.5, 0)

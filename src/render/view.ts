@@ -118,7 +118,7 @@ export function createView(
   let roads = createRoads(sim.net, sim.spec)
   const signals = createSignals()
   const cars = createCars(sim.net)
-  const walkers = createWalkers()
+  const walkers = createWalkers(ground.scenery.seed)
   walkers.add(sim.net, field, pieces)
   const emotion = createJamEmotion()
   const tools = createTools()
@@ -252,6 +252,7 @@ export function createView(
   /** Whether the browser asks for reduced motion: the clouds stop drifting and the cars stop shaking, and cars still drive. */
   let calm = false
   let shown = sim // the Sim whose cars are drawn
+  let simTimeDrawn = sim.time // the Sim's clock at the last frame drawn: a new Sim shown runs on from it (ADR 0006)
   let painted = sim // the Sim whose network the road paint shows
 
   /** Paint the roads of `by`'s network in place of the paint before. */
@@ -573,7 +574,8 @@ export function createView(
 
     /**
      * Draw a frame. `dt` is the real seconds since the last one, 0 while the sim is paused: it drives everything that
-     * moves on its own (the day, the sky, the walkers and the Jam emotion), so a pause stops the whole world. An Assembly
+     * moves on its own (the sky, the walkers and the Jam emotion), so a pause stops the whole world. The day shows the
+     * time of day the Sim's clock reads, and the movers work at the Sim's pace, so both stop with it too. An Assembly
      * plays on its own clock: the caller keeps `dt` running while one plays (`assembling`).
      * `real` is the real seconds paused or not: the camera keeps moving while the world is paused.
      */
@@ -610,8 +612,10 @@ export function createView(
       if (inspected && !shown.vehicles.includes(inspected)) inspected = null
       route.update(inspected)
       stageInspector.update(real)
-      const glow = day.update(dt)
-      movers.update(dt, day.time, glow)
+      const glow = day.update(shown.timeOfDay)
+      // Never back: the movers' work only adds up, and every Sim shown carries on the clock of the one before.
+      movers.update(dt, Math.max(0, shown.time - simTimeDrawn), day.time, glow)
+      simTimeDrawn = shown.time
       materials.setGlow(glow)
       materials.setZoom(rig.camera.zoom)
       cars.setGlow(glow)

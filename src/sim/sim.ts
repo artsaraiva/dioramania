@@ -33,6 +33,8 @@ export interface Vehicle {
 }
 
 export const DT = 1 / 30
+/** Sim-seconds in a day (#309): the picture's day cycle follows the Sim's clock. */
+export const DAY = 180
 
 /** How far along the straight `lane` the point `p` lies, from the lane's start: negative before it. */
 function along(lane: Lane, p: { x: number; y: number }) {
@@ -169,6 +171,14 @@ export class Sim {
    */
   get jams(): Junction[] {
     return this.approaches.filter((a) => a.jammed).map((a) => a.junction)
+  }
+
+  /**
+   * The time of day, 0–1 (0 morning, 0.25 noon, 0.5 dusk, 0.75 night), which moves on only as the Sim steps. It reads
+   * morning as the Pre-warm ends, so a run opens or loads in the morning, and runs on through every change to the City.
+   */
+  get timeOfDay() {
+    return ((((this.time - PREWARM) / DAY) % 1) + 1) % 1
   }
 
   /** Whether the Pre-warm is done, so the traffic can be shown. */

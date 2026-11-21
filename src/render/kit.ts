@@ -21,19 +21,23 @@ import {
   type Sway,
   type SwayKind,
 } from './movers'
-import { clad, createPatterns, pave, PATTERN, tile, wrap, type Cladding, type Pattern } from './pattern'
+import { clad, createPatterns, curtainGlass, pave, PATTERN, tile, wrap, type Cladding, type Pattern } from './pattern'
 import { canvasTexture, gable, hip, nudge, roughBall, roundedBox, tint, tone } from './shapes'
 import {
   boxesMeet,
   type Clear,
+  type CurtainPane,
+  curtainPane,
+  drawsWindows,
+  isCurtain,
   type Planting,
   POT_PLANT,
   type Solid,
+  type WallOut,
   type WindowPart,
   type Windows,
   wallWindows,
   windowed,
-  wrapsWindows,
   wrapWindows,
 } from './wall-windows'
 
@@ -235,12 +239,14 @@ const AWNING = new THREE.BoxGeometry(1, 0.1, 1.7).rotateX(-0.36)
 /**
  * Shapes the kit lays, for the builders beside it (`./props`, `./kerbside`, `./zones`), each standing on y = 0 but the
  * discs and the awning: `cone` is the parasol's eight-sided cone and `cone12` the twelve-sided one, `disc` faces -z,
- * `centred` is a cylinder centred on its middle and `bead` a ball centred on its middle.
+ * `centred` is a cylinder centred on its middle, and `bead`, `sphere` and `ball` balls centred on their middles:
+ * `sphere` for leaves, rough in low poly, and `ball` for what is not leaves, such as a dome (#279).
  */
 export const SHAPES = {
   thin: THIN,
   bead: BEAD,
   sphere: SPHERE,
+  ball: BALL,
   bush: BUSH,
   pot: POT,
   cone: CONE8,
@@ -448,11 +454,16 @@ export interface Stages {
   to: Stage
 }
 
-/** A geometry in place, in Three coordinates, with its material and the index of the brick it belongs to. */
+/**
+ * A geometry in place, in Three coordinates, with its material and the index of the brick it belongs to; and whether it
+ * is a box of a wall's windows (#277), which the street furniture does not keep off, as the surface pattern drew them,
+ * and which the scene check reads as a pattern's windows built (#279).
+ */
 export interface Part {
   geometry: THREE.BufferGeometry
   material: THREE.Material
   brick: number
+  window?: true
 }
 
 /**
@@ -486,11 +497,11 @@ const BLOCK_ZOOM = { from: 2.2, to: 3.2 }
 const TONE = { by: 0.02, chroma: 0.985 }
 /**
  * Low poly (`./look`, #277): how much darker than its wall a shutter or a door is, as the pattern shaded them (86 of 128,
- * near enough); how far a window's box may reach into another part of its building, in m, before it is left out; how
- * far round a wall to look for those parts; and how thin, two ways, a part is that covers no window, as a rail, a post,
- * a ladder's stile or a pipe does not.
+ * near enough); how far round a wall to look for the other parts of its building a window's box may not reach into
+ * (`boxesMeet`); and how thin, two ways, a part is that covers no window, as a rail, a post, a ladder's stile or a pipe
+ * does not; and how much further out than a post or a fin a curtain wall's box may stand and still run behind it (#279).
  */
-const WALL_WINDOWS = { shade: 0.66, near: 0.5, bar: 0.15 }
+const WALL_WINDOWS = { shade: 0.66, near: 0.5, bar: 0.15, proud: 0.02 }
 /**
  * Flower boxes and pots (#278): m a pot keeps in from the kerb, clear of the Walkers' line 1.6 m in (`./walkers`) by half
  * a Walker and some room; m a pot's foot may sink into what it stands on, or stand over it; m over the foot of its wall
@@ -798,29 +809,50 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   /** Hold the windows of the wall about to be added, `placed` in the map, painted `look`, for `brick` to build (`held`). */
   const holdWindows = (windows: (clear: Clear) => Windows, placed: THREE.Matrix4, look: Look) =>
     held.push({ windows, placed: placed.clone(), wall: parts.length, look, blockZoom: inBlockZoomProps })
-  /**
-   * The parts the windows were built as (#277), which `since` leaves out: the street furniture keeps off a building as
-   * the surface pattern left it, so that the look never moves it.
-   */
-  const windowParts = new WeakSet<Part>()
   /** `look` as the pattern shaded a shutter or a door on a wall of it (#277): the wall's paint, deeper. */
   const deeper = (look: Look) =>
     typeof look === 'string' ? `#${new THREE.Color(look).multiplyScalar(WALL_WINDOWS.shade).getHexString()}` : AERIAL
-  /** What a part of a wall's windows is painted (#277): the glass in its tint or left dark, the trim, or its wall's paint deeper. */
-  const windowLook = (part: WindowPart, wall: Look): Look =>
-    part === 'sill'
-      ? FRONTAGE.trim
-      : part === 'shutter' || part === 'door'
-        ? deeper(wall)
-        : { material: glass, tint: part === 'dark' ? unlit : windows[part] }
+  /**
+   * A pane of a curtain wall (#279) painted `wall`, as the pattern drew it (`curtainGlass`). The glass dims a darker
+   * tint by the square of its green as it lights (`createMaterials`), which the pattern's glow already counts.
+   */
+  const curtainLook = ({ third, tone, lit }: CurtainPane, wall: Look): Look => {
+    const { colour, glow } = curtainGlass(typeof wall === 'string' ? wall : undefined, third, tone, lit)
+    const tint = glassOf(colour)
+    return { material: glass, tint, glow: glow / Math.max(1e-3, Math.min(1, tint.g * tint.g)) }
+  }
+  /**
+   * What a part of a wall's windows is painted (#277): the glass in its tint or left dark, or a curtain wall's own
+   * (#279); the trim; or its wall's paint deeper.
+   */
+  const windowLook = (part: WindowPart, wall: Look): Look => {
+    if (isCurtain(part)) return curtainLook(curtainPane(part), wall)
+    switch (part) {
+      case 'sill':
+      case 'line':
+      case 'mullion':
+        return FRONTAGE.trim
+      case 'shutter':
+      case 'door':
+      case 'spandrel':
+        return deeper(wall)
+      case 'dark':
+        return { material: glass, tint: unlit }
+      default:
+        return { material: glass, tint: windows[part] }
+    }
+  }
   /**
    * Build the windows `held` (#277), each wall's as the brick closes, leaving out each window that would reach into
    * another part of its building: a door or a lamp the Zone put on the wall, a balcony, the glass of a lobby, the next
-   * wing of an L. Contact shadows lie under them and do not count, nor does a bar (`WALL_WINDOWS.bar`).
+   * wing of an L. Contact shadows lie under them and do not count, nor does a bar (`WALL_WINDOWS.bar`). On a curtain
+   * wall a part the glass runs behind does not count, nor round a round wall one sunk inside it (`Clear`, #279).
    * Each wall's flower boxes, and the pots along its foot where it stands on the ground its brick lands on (`h` above
    * the road), wait for the whole Block (`planted`).
-   * ponytail: each part is taken as the box round it in the wall's frame, so a round or slanting part beside a wall
-   * leaves out windows it only nears. Test the window's boxes against the part's triangles if a Zone ever lays one there.
+   * ponytail: each part is taken as the box round it in the wall's frame, so a round or slanting part beside a flat wall
+   * leaves out windows it only nears; and any part rooted in a curtain wall that stands out as far as its glass (a post,
+   * a fin, but a canopy or a sign as well) has the glass run behind it. Test the window's boxes against the part's
+   * triangles if a Zone ever lays one there.
    */
   const buildWindows = (h: number) => {
     const v = new THREE.Vector3()
@@ -833,25 +865,43 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       // The building's other parts near the wall, in the wall's own frame, but for its bars.
       const into = f.placed.clone().invert()
       const near = laid[f.wall - open]!.clone().expandByScalar(WALL_WINDOWS.near)
-      const others: THREE.Box3[] = []
+      // Each with how far from the wall's upright axis it reaches, for a round wall's (#279).
+      const others: { box: THREE.Box3; reach: number }[] = []
       laid.forEach((b, i) => {
         if (!b || open + i === f.wall || !b.intersectsBox(near)) return
         const pos = parts[open + i].geometry.attributes.position
         const there = new THREE.Box3()
-        for (let k = 0; k < pos.count; k++) there.expandByPoint(v.fromBufferAttribute(pos, k).applyMatrix4(into))
+        let reach = 0
+        for (let k = 0; k < pos.count; k++) {
+          there.expandByPoint(v.fromBufferAttribute(pos, k).applyMatrix4(into))
+          reach = Math.max(reach, Math.hypot(v.x, v.z))
+        }
         const thin = there
           .getSize(v)
           .toArray()
           .filter((size) => size <= WALL_WINDOWS.bar).length
-        if (thin < 2) others.push(there)
+        if (thin < 2) others.push({ box: there, reach })
       })
+      /**
+       * Whether `o` stands through the box `lo` to `hi` the way out of its wall, toward `sign` along `axis` (#279): from
+       * behind the box's back to within `WALL_WINDOWS.proud` of its front.
+       */
+      const through = (o: THREE.Box3, lo: THREE.Vector3, hi: THREE.Vector3, { axis, sign }: WallOut) => {
+        const [back, front, deep, far] = sign > 0 ? [lo, hi, o.min, o.max] : [hi, lo, o.max, o.min]
+        const along = (a: THREE.Vector3, b: THREE.Vector3) => sign * (a.getComponent(axis) - b.getComponent(axis))
+        return along(back, deep) >= 0 && along(far, front) >= -WALL_WINDOWS.proud
+      }
+      const clear: Clear = (lo, hi, { out, inside } = {}) =>
+        !others.some(
+          ({ box, reach }) => meets(box, lo, hi) && !(out && through(box, lo, hi, out)) && !(inside !== undefined && reach < inside),
+        )
       const was = inBlockZoomProps
       inBlockZoomProps = f.blockZoom
-      const { parts: built, plantings } = f.windows((lo, hi) => !others.some((o) => meets(o, lo, hi)))
+      const { parts: built, plantings } = f.windows(clear)
       const own = new Set<number>()
       for (const [part, faces] of built) {
         push(windowGeometry(faces, f.placed), windowLook(part, f.look))
-        windowParts.add(parts[parts.length - 1])
+        parts[parts.length - 1].window = true
         own.add(parts.length - 1)
       }
       inBlockZoomProps = was
@@ -1044,7 +1094,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
         inBlockZoomProps = f.blockZoom
         push(windowGeometry(sills, f.placed), windowLook('sill', f.look))
         parts[parts.length - 1].brick = f.brick
-        windowParts.add(parts[parts.length - 1])
+        parts[parts.length - 1].window = true
       }
     }
     inBlockZoomProps = was
@@ -1314,9 +1364,9 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
     if (!patterned) return add(geo, look, x, y, h, 0, r, tall, r)
     const g = wrap(geo.toNonIndexed(), 2 * Math.PI * r, tall, bay, storey, lit, mulberry32(seed)(), kind)
     const shape = geo instanceof THREE.CylinderGeometry ? geo.parameters : null
-    if (LOW_POLY && shape && wrapsWindows(kind)) {
+    if (LOW_POLY && shape && drawsWindows(kind)) {
       const [foot, top] = [r * shape.radiusBottom, r * shape.radiusTop]
-      const windows = (clear: Clear) => wrapWindows(foot, top, tall, shape.radialSegments, bay, storey, kind, seed, clear)
+      const windows = (clear: Clear) => wrapWindows(foot, top, tall, shape.radialSegments, { kind, bay, storey, lit }, seed, clear)
       holdWindows(windows, m.compose(new THREE.Vector3(x, h, -y), q.identity(), new THREE.Vector3(1, 1, 1)), look)
     }
     push(g.applyMatrix4(m.compose(new THREE.Vector3(x, h, -y), q.identity(), new THREE.Vector3(r, tall, r))), look)
@@ -1414,13 +1464,14 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
 
     /**
      * What the kit built since `from` (a `mark`), for the street furniture to keep off (`./kerbside`, #176): its parts'
-     * geometries in place, but for its walls' windows (#277), and the loops of its movers.
+     * geometries in place, but for its walls' windows (#277): the street furniture keeps off a building as the surface
+     * pattern left it, so that the look never moves it. And the loops of its movers.
      */
     since(from: { parts: number; movers: number }) {
       return {
         geometries: parts
           .slice(from.parts)
-          .filter((p) => !windowParts.has(p))
+          .filter((p) => !p.window)
           .map((p) => p.geometry),
         loops: movers.slice(from.movers).map(({ kind, loop }) => ({ kind, loop })),
       }

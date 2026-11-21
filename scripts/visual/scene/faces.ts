@@ -2,14 +2,20 @@
 // parts, unrolled flat, with what breaks it up; and each face of one that looks up, with whether anything stands on it.
 // Plain numbers out, as the rest of the report.
 import * as THREE from 'three'
+import { LOW_POLY } from '../../../src/render/look'
+import { drawsWindows } from '../../../src/render/wall-windows'
 import { area, boxesMeet, boxOf, hull, middle, toEdge, within } from './geometry'
 import type { Box, Pt, Roof, Wall } from './report'
 
-/** A part of a brick as the faces read it: its geometry in place (Three coordinates), its material's name, its brick. */
+/**
+ * A part of a brick as the faces read it: its geometry in place (Three coordinates), its material's name, its brick, and
+ * whether it is a box of a wall's windows (`src/render/wall-windows.ts`).
+ */
 export interface Part {
   geo: THREE.BufferGeometry
   material: string
   brick: number
+  window?: boolean
 }
 
 /** A wall or a roof of brick `brick` of what was built, before the report gives it its Tile, Block and thing. */
@@ -253,8 +259,15 @@ function wallsOf(brick: number, planes: Plane[], near: (box: Box, pad: number) =
     const [v0, v1] = [Math.min(...group.map((p) => p.v0)), Math.max(...group.map((p) => p.v1))]
     if (along < WALL.along || v1 - v0 < WALL.tall) continue
     const faces = group.flatMap((p) => p.faces)
-    const pattern = faces.every((f) => f.pattern) ? Math.max(...faces.map((f) => f.pattern)) : 0
     const own = new Set(faces.map((f) => f.of))
+    // Low poly (`src/render/look.ts`) draws flat colour where a pattern drew windows and builds the windows as boxes
+    // (#279): a face wears such a pattern only if panes of them stand on its wall, and is else as plain as any, its
+    // trim and all else read as what breaks it up. Which of its windows were left out is for the eye.
+    const glazed = (q: Bounded) => !!q.part.window && q.part.material === 'glass'
+    const unbuilt =
+      LOW_POLY && faces.some((f) => drawsWindows(f.pattern)) && !group.some((p) => marksOn(p, own, near, (u) => u, glazed).length)
+    const wears = (f: Facet) => (unbuilt && drawsWindows(f.pattern) ? 0 : f.pattern)
+    const pattern = faces.every(wears) ? Math.max(...faces.map(wears)) : 0
     const shape: Pt[][] = []
     const marks: Box[] = []
     const foot: Pt[] = []
@@ -272,7 +285,7 @@ function wallsOf(brick: number, planes: Plane[], near: (box: Box, pad: number) =
         const pts = f.tris.flat()
         const [a, b] = [x(Math.min(...pts.map(u))), x(Math.max(...pts.map(u)))]
         const [lo, hi] = [Math.min(...pts.map((q) => q.y)), Math.max(...pts.map((q) => q.y))]
-        if (f.pattern && !pattern) marks.push({ x0: a, x1: b, y0: lo, y1: hi })
+        if (wears(f) && !pattern) marks.push({ x0: a, x1: b, y0: lo, y1: hi })
         else if (curved)
           shape.push([
             { x: a, y: lo },
@@ -300,14 +313,21 @@ function wallsOf(brick: number, planes: Plane[], near: (box: Box, pad: number) =
 /**
  * What breaks up an upright plane: every part but its wall's own with some of it within `FRONT` of the plane, in front
  * of it or flush with it, over the plane's extent: a window or its frame, a door, a sign, a downpipe, a neighbour's wall
- * against it. Each as the box it covers on the wall, `x` placing a point along the plane along the wall.
+ * against it. Each as the box it covers on the wall, `x` placing a point along the plane along the wall; only the parts
+ * `only` keeps, if given.
  */
-function marksOn(f: Plane, own: Set<Bounded>, near: (box: Box, pad: number) => Bounded[], x: (u: number) => number): Box[] {
+function marksOn(
+  f: Plane,
+  own: Set<Bounded>,
+  near: (box: Box, pad: number) => Bounded[],
+  x: (u: number) => number,
+  only: (q: Bounded) => boolean = () => true,
+): Box[] {
   const t = alongOf(f.n)
   const box = boxOf(f.faces.flatMap((g) => g.tris.flat().map(map)))
   const out: Box[] = []
   for (const q of near(box, FRONT.out + 0.2)) {
-    if (own.has(q) || q.y1 <= f.v0 || q.y0 >= f.v1) continue
+    if (own.has(q) || !only(q) || q.y1 <= f.v0 || q.y0 >= f.v1) continue
     const pos = q.part.geo.attributes.position
     let [d0, d1, a0, a1] = [Infinity, -Infinity, Infinity, -Infinity]
     for (let k = 0; k < pos.count; k++) {

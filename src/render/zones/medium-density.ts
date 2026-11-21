@@ -4,6 +4,7 @@ import { type Bounds, middle, polyline, type Vec } from '../../sim/geometry'
 import { KERB } from '../blocks'
 import { KEI } from '../cars'
 import { inside } from '../field'
+import { LOW_POLY } from '../look'
 import {
   AERIAL,
   AIRCON,
@@ -1362,13 +1363,14 @@ const TERRACE_FINISH = {
 // steeply a mansard's skirt of tiles slopes (rad), in the tiles its plan gives it; the condensers on its roof at Stages 1
 // to 3; how brightly the lights over its doors and at its stairs' landings glow, for the lamps' glow; and the lamps on its
 // walkways' parapets, `lamp` m wide and tall and brighter, before the walkways' windows dimmed to `dim` of the windows' glow, so
-// that its walkways read as rows of dots at night at City zoom.
+// that its walkways read as rows of dots at night at City zoom. Low poly (`../look`, #279) they burn lower: the blend's
+// glow would spread rows of them over the whole face.
 const APARTMENT_FINISH = {
   deck: '#9fb5a7',
   mansard: { tip: 0.9 },
   condensers: [2, 3, 5],
   light: DOOR_LIGHT,
-  walkway: { lamp: [1.2, 0.6], light: 3, dim: 0.3 },
+  walkway: { lamp: [1.2, 0.6], light: LOW_POLY ? 0.8 : 3, dim: 0.3 },
   frame: '#4a525c',
   washing: [0, 0.12, 0.16], // of a walkway's bays at Stages 1 to 3
 }

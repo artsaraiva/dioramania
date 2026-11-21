@@ -800,7 +800,7 @@ function flag(kit: Kit, x: number, y: number, h: number, colour: string) {
 }
 
 // The office tower: its palette, its plan and its builder, beside the fill that lays it (#207).
-const { cylinder: CYLINDER, centred: DISC, pyramid: PYRAMID, sphere: SPHERE, thin: THIN } = SHAPES
+const { ball: BALL, cylinder: CYLINDER, centred: DISC, pyramid: PYRAMID, thin: THIN } = SHAPES
 const TAU = Math.PI * 2
 const [m, q, up] = [new THREE.Matrix4(), new THREE.Quaternion(), new THREE.Vector3(0, 1, 0)] // for shaping in place
 // An office tower's curtain wall is one of these glasses, which the kit's one glass is tinted to, and its frame,
@@ -949,7 +949,7 @@ function officeTower(
    */
   const curved = (geo: THREE.BufferGeometry, at: number, ry: number, sx: number, sy: number, around: number, rise: number) => {
     if (!kit.patterned) return kit.add(geo, trim, x, y, at, ry, sx, sy, sx)
-    const g = panel(geo.toNonIndexed(), PATTERN.deck, around, rise, mulberry32(seed + 11)())
+    const g = panel(geo.index ? geo.toNonIndexed() : geo.clone(), PATTERN.deck, around, rise, mulberry32(seed + 11)())
     kit.push(g.applyMatrix4(m.compose(new THREE.Vector3(x, at, -y), q.setFromAxisAngle(up, ry), new THREE.Vector3(sx, sy, sx))), trim)
   }
   /** Corner posts up a box `pw` by `pd`, from `from` for `tall` m. */
@@ -1126,7 +1126,7 @@ function officeTower(
       for (const u of [-0.2, 0.15]) vent(kit, x + r * u, y - r * 0.35, top + 1.2)
       dish(x - r * 0.4, y + r * 0.2, top + 1.2)
     } else {
-      curved(SPHERE, top + 1.4, 0, r * 0.78, r * 0.52, 16, 10)
+      curved(BALL, top + 1.4, 0, r * 0.78, r * 0.52, 16, 10)
       spire(top + 1.4 + r * 0.5, stage === 3 ? kit.range(9, 13) : kit.range(4, 6), 0.3)
     }
   } else if (form === 'stepped') {
