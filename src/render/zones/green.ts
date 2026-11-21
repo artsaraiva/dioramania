@@ -1076,7 +1076,7 @@ function hives(kit: Kit, x: number, y: number, h: number, ry: number, stage: num
 export function person(kit: Kit, x: number, y: number, h: number, ry: number, shirt: string, hat = true, s = 1) {
   kit.add(kit.cuboid(0.34, 0.8, 0.26), PAINT.legs, x, y, h, ry, s, s, s)
   kit.add(kit.cuboid(0.46, 0.62, 0.3), shirt, x, y, h + 0.8 * s, ry, s, s, s)
-  kit.add(SHAPES.sphere, PAINT.skin, x, y, h + 1.62 * s, 0, 0.19 * s, 0.2 * s, 0.19 * s)
+  kit.add(SHAPES.ball, PAINT.skin, x, y, h + 1.62 * s, 0, 0.19 * s, 0.2 * s, 0.19 * s)
   if (!hat) return
   kit.add(SHAPES.cylinder, PAINT.straw, x, y, h + 1.74 * s, 0, 0.36 * s, 0.04 * s, 0.36 * s)
   kit.add(SHAPES.cone, PAINT.straw, x, y, h + 1.76 * s, 0, 0.2 * s, 0.2 * s, 0.2 * s)
@@ -1091,7 +1091,7 @@ function kiteRise(kit: Kit, l: RowLot, stage: number, h: number) {
   const draw = mulberry32(spot(l.x, l.y) ^ 0x417e)
   const pick = (from: string[]) => from[Math.floor(draw() * from.length)]
   const [r, tall] = [Math.min(l.w, l.d) / 2 - 0.3, 1.1]
-  kit.add(SHAPES.sphere, PAINT.rise, l.x, l.y, h - 0.04, 0, r, tall, r)
+  kit.add(SHAPES.ball, PAINT.rise, l.x, l.y, h - 0.04, 0, r, tall, r)
   const ry = Math.atan2(-WIND.x, WIND.y) // a front that looks downwind
   const flyers = [
     [0, 0, 1],
