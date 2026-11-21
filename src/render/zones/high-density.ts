@@ -3,9 +3,26 @@ import { mulberry32 } from '../../sim/demand'
 import { type Bounds, middle, polyline, type Vec } from '../../sim/geometry'
 import { KERB } from '../blocks'
 import { planter, type Footprint } from '../kerbside'
-import { AERIAL, boxFace, CREAM, FACES, FRONTAGE, FUTONS, GARDEN, type Kit, LEAVES, PLANT, PLAY, SHAPES, spot, TANK, to } from '../kit'
+import {
+  AERIAL,
+  BLOOMS,
+  boxFace,
+  CREAM,
+  FACES,
+  FRONTAGE,
+  FUTONS,
+  GARDEN,
+  type Kit,
+  LEAVES,
+  PLANT,
+  PLAY,
+  SHAPES,
+  spot,
+  TANK,
+  to,
+} from '../kit'
 import { PATTERN } from '../pattern'
-import { bedTree, bench, BLOOMS, GLOWS, railing, SETTS, STONE, waiting, WOOD } from '../props'
+import { bedTree, bench, GLOWS, railing, SETTS, STONE, waiting, WOOD } from '../props'
 import { fit, lotsOf, overlap, PLANTER, stands, turned, type Look, type RowLot, type ZoneGround } from './ground'
 import { beside, clearOfScenes, placeScenes, sceneOrder, type Scene, unlike } from './scenes'
 

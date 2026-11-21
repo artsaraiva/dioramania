@@ -136,9 +136,6 @@ export function shrine(kit: Kit, x: number, y: number, w: number, d: number, ry:
   kit.brick('building', x, y, h)
 }
 
-/** Flowers in bloom, as low- and medium-density lay them in borders and window boxes (#179), and a park's beds (#180). */
-export const BLOOMS = ['#ffadc8', '#f6d36a', '#fff7e8', '#c7b8f0']
-
 /** A steel garden shed's walls and its roof (#178). */
 const SHED = { wall: '#d9dcd2', roof: '#8f9aa5' }
 
