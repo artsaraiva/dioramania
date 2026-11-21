@@ -405,10 +405,10 @@ function forklift(): THREE.BufferGeometry {
 }
 
 /**
- * A shopper (#175) walking a shops Tile's pavement and stopping at the fronts, as tall as the walkers: legs, a coat in
- * white for its paint, a head and hair, and a bag at its side. Faces +x.
+ * A shopper (#175) walking a shops Tile's pavement and stopping at the fronts: legs, a coat in white for its paint, a
+ * head and hair, and a bag at its side. Faces +x.
  */
-export function shopper(): THREE.BufferGeometry {
+function shopper(): THREE.BufferGeometry {
   const [LEGS, SKIN, HAIR, BAG] = ['#3a4252', '#f1d1b5', '#3a3330', '#f4ead2']
   return merged([
     part(0.26, 0.82, 0.4, 0, 0, 0, LEGS),
