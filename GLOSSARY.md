@@ -156,7 +156,7 @@ Traffic lights that run a Priority junction of three Arms or more in phases: the
 _Avoid_: Traffic light, street light, stoplight, lights
 
 **Walk phase**:
-The phase of a Signal in which every Arm is red and Walkers cross.
+The phase of a Signal in which every Arm is red and Walkers cross. It lasts long enough for those waiting as it begins to cross the Junction's widest Road.
 _Avoid_: Pedestrian phase, all-red, scramble, green man
 
 **Spillback**:
@@ -180,7 +180,7 @@ _Avoid_: Congestion, traffic, gridlock
 ### People
 
 **Walker**:
-A person of the City, on foot, with a name, a home, something they do and a log of their Storylets: always the same person in the same City, and a driver out of their car is one. Walkers stay on the pavements and at the Places off them, and traffic stops for them at a Signal.
+A person of the City, on foot, with a name, a home, something they do and a log of their Storylets: always the same person in the same City, and a driver out of their car is one. Walkers stay on the pavements and at the Places off them, and cross a Road only at a Signal of their own Tile, in the Walk phase traffic stops for, to walk the pavement they reach.
 _Avoid_: Pedestrian, person, peg, citizen, character, NPC
 
 **Place**:

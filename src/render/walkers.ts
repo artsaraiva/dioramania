@@ -1,10 +1,12 @@
 import * as THREE from 'three'
-import type { Bounds, Vec } from '../sim/geometry'
+import { pointAt, type Bounds, type Vec } from '../sim/geometry'
 import type { Network } from '../sim/network'
-import { whereIs, Walkers, type Kind, type Place, type Walker } from '../walkers/walkers'
+import { takesSignal } from '../sim/signals'
+import { whereIs, Walkers, type Kind, type LeftToCross, type Place, type Walker, type Zebra } from '../walkers/walkers'
 import { KERB } from './blocks'
 import { inside, type Field } from './field'
 import { LOW_POLY } from './look'
+import { ZEBRA } from './roads'
 import { merged, part, takesPaint, tint } from './shapes'
 
 const INSET = 1.6 // m in from the kerb: the pavement's centre line
@@ -17,6 +19,9 @@ const phaseOf = (walker: Walker) => ((walker.seed >>> 3) % 1000) / 100
 const talks = (walker: Walker) => walker.seed % 5 < 3
 const SEAT = 0.52 // m up from the pavement the top of a bench's seat is
 const EASE = 5 // how quickly a walker sits, gets up, stops swinging and turns, per s
+// m/s faster than any walker walks, and m: a step of the model larger than the one, and less than the other, is a step
+// aside, which the figure eases through.
+const ASIDE = { pace: 2, most: 1.5 }
 // The marker over the Walker followed (#289): the prototype's yellow gem, `size` m tall, at least `least` px tall on
 // screen however far out, `over` its own height above the head, bobbing and turning, rimmed `rim` of its size in the
 // kit's ink (src/ui/kit.css).
@@ -157,6 +162,30 @@ function toSegment(px: number, py: number, ax: number, ay: number, bx: number, b
 }
 
 /**
+ * The zebra of each Arm of the Junctions on the piece of slab `piece` that can take a Signal, as the Walkers cross it
+ * (#296): from the centre line of the pavement on one side of the Road to the other's, across the middle of its
+ * stripes, as `./roads` paints them.
+ */
+function zebrasOf(net: Network, piece: Bounds): Zebra[] {
+  const on = ({ x, y }: Vec) => x >= piece.x0 && x < piece.x1 && y >= piece.y0 && y < piece.y1
+  return net.junctions
+    .filter((junction) => takesSignal(junction) && on(junction.at))
+    .flatMap((junction) =>
+      junction.arms.flatMap((arm) => {
+        const first = arm.approach[0]
+        if (!first) return []
+        const end = pointAt(first.line, first.length)
+        const [fx, fy, lx, ly] = [Math.cos(end.heading), Math.sin(end.heading), -Math.sin(end.heading), Math.cos(end.heading)]
+        // m left of the first Approach lane's centre, which sits half a lane in from the Road's right kerb.
+        const lane = arm.width / (arm.approach.length + arm.exit.length)
+        const along = ZEBRA.setback + ZEBRA.length / 2
+        const at = (o: number): Vec => ({ x: end.x + fx * along + lx * o, y: end.y + fy * along + ly * o })
+        return [{ junction: junction.id, ends: [at(-lane / 2 - INSET), at(arm.width - lane / 2 + INSET)] as const }]
+      }),
+    )
+}
+
+/**
  * The City's Walkers on the pavement, one instanced mesh per kind (#176), as `../walkers/walkers` has them: who each
  * is, where they walk and what they do comes from there, seeded `seed`, the City's. Each faces the way it walks, its
  * legs and arms swinging in step with the ground it covers (#287), and stops swinging as it stops (#288): it goes out
@@ -194,11 +223,24 @@ export function createWalkers(seed: number) {
   let t = 0
   /**
    * How each walker is shown, eased frame by frame: where in its stride, how far it swings, sits and shows, and where
-   * it is, how high the ground under it is (`h`, a terrace's or the pavement's) and which way it faces.
+   * it is, how high the ground under it is (`h`, a terrace's or the pavement's) and which way it faces; where its model
+   * put it last frame, and how far from there it is still drawn after a step aside.
    */
   const shown = new WeakMap<
     Walker,
-    { stride: number; swing: number; sit: number; size: number; arm: number; x: number; y: number; h: number; heading: number }
+    {
+      stride: number
+      swing: number
+      sit: number
+      size: number
+      arm: number
+      x: number
+      y: number
+      h: number
+      heading: number
+      was: Vec
+      off: Vec
+    }
   >()
   /** How high the soles of `walker`'s feet are, shown as `look`: lower as they sit. */
   const footOf = (walker: Walker, look: { sit: number; h: number }) => look.h - look.sit * (FIGURES[walker.kind].hip - SEAT)
@@ -288,8 +330,8 @@ export function createWalkers(seed: number) {
     },
 
     /**
-     * Walkers on the pavement of the pieces of slab `pieces`, laid in `field`, and their ways to `places`, round
-     * `obstacles` (see `Walkers.add`). Nobody can reach a roundabout's island.
+     * Walkers on the pavement of the pieces of slab `pieces`, laid in `field`, their ways to `places`, round
+     * `obstacles` (see `Walkers.add`), and the zebras of `net` they cross by. Nobody can reach a roundabout's island.
      * ponytail: the ways cost up to 18 ms a Tile (about 10 ms on average, M4 Pro), as does `refit`'s at a Stage-up, a
      * dropped frame; work them out over frames if it shows.
      */
@@ -301,6 +343,7 @@ export function createWalkers(seed: number) {
           field.outlines(INSET, [piece]).filter((loop) => !islands.some((at) => inside(loop, at.x, at.y))),
           places,
           obstacles,
+          zebrasOf(net, piece),
         )
       }
       remesh()
@@ -318,17 +361,34 @@ export function createWalkers(seed: number) {
       remesh()
     },
 
-    /** `dt` is the real seconds since the last frame, 0 while paused; `perPixel`, the m of ground a CSS pixel spans. */
-    update(dt: number, perPixel: number) {
+    /**
+     * `dt` is the real seconds since the last frame, 0 while paused; `perPixel`, the m of ground a CSS pixel spans.
+     * The Walkers wait at the kerb and cross on the Sim's `simDt` seconds since then, by the seconds `leftToCross` at
+     * each Junction (see `Walkers.step`).
+     */
+    update(dt: number, perPixel: number, simDt: number, leftToCross: LeftToCross) {
       t += dt
-      walkers.step(dt)
+      walkers.step(dt, leftToCross, simDt)
       const index = new Map<Kind, number>(ORDER.map((k) => [k, 0]))
       const ease = Math.min(1, dt * EASE)
       for (const walker of walkers.all) {
-        const p = whereIs(walker)
-        const look = shown.get(walker) ?? { stride: phaseOf(walker), swing: 1, sit: 0, size: 1, arm: 0, h: KERB, ...p }
+        const model = whereIs(walker)
+        const look = shown.get(walker) ?? {
+          ...{ stride: phaseOf(walker), swing: 1, sit: 0, size: 1, arm: 0, h: KERB, ...model },
+          was: { x: model.x, y: model.y },
+          off: { x: 0, y: 0 },
+        }
         shown.set(walker, look)
-        const moving = walker.doing === 'stroll' || walker.doing === 'go' || walker.doing === 'back'
+        // A two that turns to face across the Road, or back along the pavement after it, changes sides of each other in
+        // a step (#296): drawn, they walk round to it. Not one gone up to a terrace or come down from it (#293).
+        const step = Math.hypot(model.x - look.was.x, model.y - look.was.y)
+        if (step > ASIDE.pace * Math.max(dt, simDt) + 0.01 && step < ASIDE.most && (model.h ?? KERB) === look.h) {
+          look.off.x += look.was.x - model.x
+          look.off.y += look.was.y - model.y
+        }
+        ;[look.off.x, look.off.y, look.was.x, look.was.y] = [look.off.x * (1 - ease), look.off.y * (1 - ease), model.x, model.y]
+        const p = { x: model.x + look.off.x, y: model.y + look.off.y, heading: model.heading, h: model.h }
+        const moving = walker.doing === 'stroll' || walker.doing === 'go' || walker.doing === 'back' || walker.doing === 'cross'
         const place = walker.way?.place
         const act = walker.doing === 'act' ? place?.kind : undefined
         // Indoors at a door, or on the way up to a terrace or down from it (#293); sat on a bench, or on a terrace's seat.
