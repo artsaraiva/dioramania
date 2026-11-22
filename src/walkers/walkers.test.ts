@@ -71,15 +71,16 @@ const box = (x0: number, y0: number, x1: number, y1: number) => [
   { x: x0, y: y1 },
 ]
 // On the west Tile's pavement 12 m in, along its south side: a shop door with a pot straight between it and the
-// pavement, and a bench. Both face south, to the pavement.
+// pavement, a bench, and the door of a shop with a terrace on its roof. All face south, to the pavement.
 const DOOR: Place = { kind: 'door', x: 0, y: -35, ry: Math.PI }
 const BENCH: Place = { kind: 'bench', x: -20, y: -30, ry: Math.PI }
+const TERRACE: Place = { kind: 'terrace', x: 20, y: -35, ry: Math.PI, up: { x: 20, y: -30, h: 10, ry: Math.PI, sit: false } }
 const POT = box(-0.3, -37, 0.3, -36.4)
 
 /** What each Walker of a City of seed `seed` with the west Tile was doing, and where, every step of ten minutes. */
 function seen(seed: number) {
   const walkers = new Walkers(seed)
-  walkers.add(WEST, [pavement(WEST, 12)], [DOOR, BENCH], [POT])
+  walkers.add(WEST, [pavement(WEST, 12)], [DOOR, BENCH, TERRACE], [POT])
   const steps: string[][] = []
   for (let t = 0; t < 600; t += 0.1) {
     walkers.step(0.1)
@@ -92,5 +93,5 @@ it('what each Walker does comes from the City’s seed', () => {
   const seven = seen(7)
   expect(seen(7)).toEqual(seven)
   expect(seen(8)).not.toEqual(seven)
-  expect(['act:door', 'act:bench'].every((act) => seven.flat().some((w) => w.startsWith(act)))).toBe(true)
+  expect(['act:door', 'act:bench', 'up:terrace'].every((act) => seven.flat().some((w) => w.startsWith(act)))).toBe(true)
 })

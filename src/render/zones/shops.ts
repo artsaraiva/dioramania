@@ -982,6 +982,10 @@ function shop(kit: Kit, x: number, y: number, h: number, w: number, d: number, r
     const [dw, dd] = [Math.min(tw * 0.5, 4.2), Math.min(td * 0.42, 4.4)]
     const [u, v] = [-door * (tw / 2 - 0.35 - dw / 2), roofFront - (billboarded ? 1.7 : 0.45) - dd / 2]
     kit.local(kit.cuboid(dw, 0.1, dd), SHOPFRONT.deck, x, y, ry, u, v, roof)
+    // Room to stand at its front, clear of the tables and the parasol, for a Walker who comes up (#293): looking out
+    // over the Road, or with a billboard or a false front close before it, turned back across the deck.
+    const blocked = billboarded || form === 'facade'
+    kit.terrace(...to(x, y, ry, u - 0.22 * dw, v + dd / 2 - 0.45), roof + 0.1, blocked ? ry + Math.PI : ry)
     for (const [i, j] of [
       [-0.22, -0.18],
       [0.22, 0.2],

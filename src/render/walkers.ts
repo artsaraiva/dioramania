@@ -192,13 +192,16 @@ export function createWalkers(seed: number) {
     new THREE.Vector3(),
   ]
   let t = 0
-  /** How each walker is shown, eased frame by frame: where in its stride, how far it swings, sits and shows, and where it is and faces. */
+  /**
+   * How each walker is shown, eased frame by frame: where in its stride, how far it swings, sits and shows, and where
+   * it is, how high the ground under it is (`h`, a terrace's or the pavement's) and which way it faces.
+   */
   const shown = new WeakMap<
     Walker,
-    { stride: number; swing: number; sit: number; size: number; arm: number; x: number; y: number; heading: number }
+    { stride: number; swing: number; sit: number; size: number; arm: number; x: number; y: number; h: number; heading: number }
   >()
   /** How high the soles of `walker`'s feet are, shown as `look`: lower as they sit. */
-  const footOf = (walker: Walker, look: { sit: number }) => KERB - look.sit * (FIGURES[walker.kind].hip - SEAT)
+  const footOf = (walker: Walker, look: { sit: number; h: number }) => look.h - look.sit * (FIGURES[walker.kind].hip - SEAT)
 
   /** The Walker the player Follows, and the marker over them. */
   let followed: Walker | null = null
@@ -323,27 +326,32 @@ export function createWalkers(seed: number) {
       const ease = Math.min(1, dt * EASE)
       for (const walker of walkers.all) {
         const p = whereIs(walker)
-        const look = shown.get(walker) ?? { stride: phaseOf(walker), swing: 1, sit: 0, size: 1, arm: 0, ...p }
+        const look = shown.get(walker) ?? { stride: phaseOf(walker), swing: 1, sit: 0, size: 1, arm: 0, h: KERB, ...p }
         shown.set(walker, look)
         const moving = walker.doing === 'stroll' || walker.doing === 'go' || walker.doing === 'back'
-        const act = walker.doing === 'act' ? walker.way?.place.kind : undefined
+        const place = walker.way?.place
+        const act = walker.doing === 'act' ? place?.kind : undefined
+        // Indoors at a door, or on the way up to a terrace or down from it (#293); sat on a bench, or on a terrace's seat.
+        const indoors = (act !== undefined && act !== 'bench') || walker.doing === 'down'
+        const sat = act === 'bench' || (walker.doing === 'up' && place?.kind === 'terrace' && place.up.sit)
+        // Sat or up on a terrace beside the other of a two.
+        const together = walker.side !== 0 && (sat || walker.doing === 'up')
         // One whole stride is 2π, of the ground it has covered.
         look.stride = (look.stride + (Math.hypot(p.x - look.x, p.y - look.y) * Math.PI * 2) / strideOf(walker.kind)) % (Math.PI * 2)
         look.swing += ((moving ? 1 : 0) - look.swing) * ease
-        look.sit += ((act === 'bench' ? 1 : 0) - look.sit) * ease
-        look.size += ((act === 'door' ? 0 : 1) - look.size) * ease
-        const talking = (walker.doing === 'stop' || (act === 'bench' && walker.side !== 0)) && talks(walker) && look.size > 0.9
+        look.sit += ((sat ? 1 : 0) - look.sit) * ease
+        look.size += ((indoors ? 0 : 1) - look.size) * ease
+        const talking = (walker.doing === 'stop' || together) && talks(walker) && look.size > 0.9
         look.arm += ((talking ? 1.25 + Math.sin(t * 5 + phaseOf(walker)) * 0.3 : 0) - look.arm) * ease
         look.heading += Math.atan2(Math.sin(p.heading - look.heading), Math.cos(p.heading - look.heading)) * ease
-        ;[look.x, look.y] = [p.x, p.y]
-        // Sat beside the other of a two, it turns to them; stopped, it looks about; walking, a little.
+        ;[look.x, look.y, look.h] = [p.x, p.y, p.h ?? KERB]
+        // Sat or up on a terrace beside the other of a two, it turns to them; stopped, it looks about; walking, a little.
         const phase = phaseOf(walker)
-        const head =
-          act === 'bench' && walker.side
-            ? walker.side * 1.2 + Math.sin(t * 0.9 + phase) * 0.2
-            : moving
-              ? Math.sin(t * 0.5 + phase) * 0.18
-              : Math.sin(t * 0.9 + phase) * 0.5
+        const head = together
+          ? walker.side * 1.2 + Math.sin(t * 0.9 + phase) * 0.2
+          : moving
+            ? Math.sin(t * 0.5 + phase) * 0.18
+            : Math.sin(t * 0.9 + phase) * 0.5
         at.set(look.x, footOf(walker, look), -look.y)
         q.setFromAxisAngle(up, look.heading)
         const i = index.get(walker.kind)!

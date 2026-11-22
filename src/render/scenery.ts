@@ -226,9 +226,14 @@ export function createScenery(
       for (const sway of done.sways) sways.push({ ...sway, brick: sway.brick + bricks.length })
       for (const flag of done.flags) flags.push({ ...flag, brick: flag.brick + bricks.length })
       for (const pool of done.pools) pools.push({ ...pool, brick: pool.brick + bricks.length })
-      // A Stage-up build holds both Stages: the Places are the new one's. A bench keeps to the ground a Walker walks.
-      for (const { kind, x, y, ry, h, brick } of done.places)
-        if (done.bricks[brick]?.fate !== 'goes' && (kind === 'door' || Math.abs((h ?? KERB) - KERB) < 0.3)) places.push({ kind, x, y, ry })
+      // A Stage-up build holds both Stages: the Places are the new one's. A bench keeps to the ground a Walker walks,
+      // and a terrace is gone up to by the first door of its building (#293).
+      const kept = done.places.filter((p) => done.bricks[p.brick]?.fate !== 'goes')
+      for (const { kind, x, y, ry, h = KERB, sit = false, brick } of kept) {
+        if (kind === 'door' || (kind === 'bench' && Math.abs(h - KERB) < 0.3)) places.push({ kind, x, y, ry })
+        const door = kind === 'terrace' && kept.find((p) => p.kind === 'door' && p.brick === brick)
+        if (door) places.push({ kind: 'terrace', x: door.x, y: door.y, ry: door.ry, up: { x, y, h, ry, sit } })
+      }
       bricks.push(...done.bricks.map((brick) => ({ ...brick, block: index })))
     }
     const slab = createKit(mulberry32(0), materials, watch?.label)
