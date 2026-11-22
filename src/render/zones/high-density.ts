@@ -813,6 +813,7 @@ function residentialTower(
     const by = gy + gd * 0.22
     kit.add(kit.cuboid(1.5, 0.1, 0.45), WOOD.stand, gx, by, lawn + 0.4)
     kit.add(kit.cuboid(1.5, 0.4, 0.08), WOOD.stand, gx, by + 0.22, lawn + 0.55)
+    kit.terrace(gx, by, lawn, Math.PI, true) // facing south, off its back: a Walker comes up to sit on it (#293)
     const out = Math.max(gw / 2 - 0.5, 1.2) // the planters, clear of the bench's ends
     for (const k of [-1, 1]) {
       kit.add(kit.cuboid(0.1, 0.4, 0.4), WOOD.dark, gx + k * 0.65, by, lawn)

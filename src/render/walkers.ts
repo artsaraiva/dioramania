@@ -223,7 +223,8 @@ export function createWalkers(seed: number) {
   let t = 0
   /**
    * How each walker is shown, eased frame by frame: where in its stride, how far it swings, sits and shows, and where
-   * it is and faces; where its model put it last frame, and how far from there it is still drawn after a step aside.
+   * it is, how high the ground under it is (`h`, a terrace's or the pavement's) and which way it faces; where its model
+   * put it last frame, and how far from there it is still drawn after a step aside.
    */
   const shown = new WeakMap<
     Walker,
@@ -235,13 +236,14 @@ export function createWalkers(seed: number) {
       arm: number
       x: number
       y: number
+      h: number
       heading: number
       was: Vec
       off: Vec
     }
   >()
   /** How high the soles of `walker`'s feet are, shown as `look`: lower as they sit. */
-  const footOf = (walker: Walker, look: { sit: number }) => KERB - look.sit * (FIGURES[walker.kind].hip - SEAT)
+  const footOf = (walker: Walker, look: { sit: number; h: number }) => look.h - look.sit * (FIGURES[walker.kind].hip - SEAT)
 
   /** The Walker the player Follows, and the marker over them. */
   let followed: Walker | null = null
@@ -372,39 +374,44 @@ export function createWalkers(seed: number) {
       for (const walker of walkers.all) {
         const model = whereIs(walker)
         const look = shown.get(walker) ?? {
-          ...{ stride: phaseOf(walker), swing: 1, sit: 0, size: 1, arm: 0, ...model },
+          ...{ stride: phaseOf(walker), swing: 1, sit: 0, size: 1, arm: 0, h: KERB, ...model },
           was: { x: model.x, y: model.y },
           off: { x: 0, y: 0 },
         }
         shown.set(walker, look)
         // A two that turns to face across the Road, or back along the pavement after it, changes sides of each other in
-        // a step (#296): drawn, they walk round to it.
+        // a step (#296): drawn, they walk round to it. Not one gone up to a terrace or come down from it (#293).
         const step = Math.hypot(model.x - look.was.x, model.y - look.was.y)
-        if (step > ASIDE.pace * Math.max(dt, simDt) + 0.01 && step < ASIDE.most) {
+        if (step > ASIDE.pace * Math.max(dt, simDt) + 0.01 && step < ASIDE.most && (model.h ?? KERB) === look.h) {
           look.off.x += look.was.x - model.x
           look.off.y += look.was.y - model.y
         }
         ;[look.off.x, look.off.y, look.was.x, look.was.y] = [look.off.x * (1 - ease), look.off.y * (1 - ease), model.x, model.y]
-        const p = { x: model.x + look.off.x, y: model.y + look.off.y, heading: model.heading }
+        const p = { x: model.x + look.off.x, y: model.y + look.off.y, heading: model.heading, h: model.h }
         const moving = walker.doing === 'stroll' || walker.doing === 'go' || walker.doing === 'back' || walker.doing === 'cross'
-        const act = walker.doing === 'act' ? walker.way?.place.kind : undefined
+        const place = walker.way?.place
+        const act = walker.doing === 'act' ? place?.kind : undefined
+        // Indoors at a door, or on the way up to a terrace or down from it (#293); sat on a bench, or on a terrace's seat.
+        const indoors = (act !== undefined && act !== 'bench') || walker.doing === 'down'
+        const sat = act === 'bench' || (walker.doing === 'up' && place?.kind === 'terrace' && place.up.sit)
+        // Sat or up on a terrace beside the other of a two.
+        const together = walker.side !== 0 && (sat || walker.doing === 'up')
         // One whole stride is 2π, of the ground it has covered.
         look.stride = (look.stride + (Math.hypot(p.x - look.x, p.y - look.y) * Math.PI * 2) / strideOf(walker.kind)) % (Math.PI * 2)
         look.swing += ((moving ? 1 : 0) - look.swing) * ease
-        look.sit += ((act === 'bench' ? 1 : 0) - look.sit) * ease
-        look.size += ((act === 'door' ? 0 : 1) - look.size) * ease
-        const talking = (walker.doing === 'stop' || (act === 'bench' && walker.side !== 0)) && talks(walker) && look.size > 0.9
+        look.sit += ((sat ? 1 : 0) - look.sit) * ease
+        look.size += ((indoors ? 0 : 1) - look.size) * ease
+        const talking = (walker.doing === 'stop' || together) && talks(walker) && look.size > 0.9
         look.arm += ((talking ? 1.25 + Math.sin(t * 5 + phaseOf(walker)) * 0.3 : 0) - look.arm) * ease
         look.heading += Math.atan2(Math.sin(p.heading - look.heading), Math.cos(p.heading - look.heading)) * ease
-        ;[look.x, look.y] = [p.x, p.y]
-        // Sat beside the other of a two, it turns to them; stopped, it looks about; walking, a little.
+        ;[look.x, look.y, look.h] = [p.x, p.y, p.h ?? KERB]
+        // Sat or up on a terrace beside the other of a two, it turns to them; stopped, it looks about; walking, a little.
         const phase = phaseOf(walker)
-        const head =
-          act === 'bench' && walker.side
-            ? walker.side * 1.2 + Math.sin(t * 0.9 + phase) * 0.2
-            : moving
-              ? Math.sin(t * 0.5 + phase) * 0.18
-              : Math.sin(t * 0.9 + phase) * 0.5
+        const head = together
+          ? walker.side * 1.2 + Math.sin(t * 0.9 + phase) * 0.2
+          : moving
+            ? Math.sin(t * 0.5 + phase) * 0.18
+            : Math.sin(t * 0.9 + phase) * 0.5
         at.set(look.x, footOf(walker, look), -look.y)
         q.setFromAxisAngle(up, look.heading)
         const i = index.get(walker.kind)!

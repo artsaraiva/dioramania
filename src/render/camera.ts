@@ -45,6 +45,9 @@ export interface Drive {
   zoom: number
 }
 
+/** A point the camera can hold near the middle of the canvas (a Walker followed): on the map, `h` m above the road. */
+type Held = Vec & { h?: number }
+
 /** Where the camera is. */
 interface Pose {
   /** The point of the road plane at the middle of the canvas, as Three x and z. */
@@ -78,8 +81,8 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
   let pose: Pose = { x: 0, z: 0, heading: START_HEADING, tilt: TILT.start, zoom: 1 }
   let opened = false // whether the start view has framed the City, which waits for the canvas to have a size
   let flight: { from: Pose; to: Pose; t: number } | null = null
-  /** Where the point the camera holds near the middle of the canvas is now, or null once it is gone. */
-  let anchor: (() => Vec | null) | null = null
+  /** Where the point the camera holds near the middle of the canvas is now, `h` m above the road, or null once it is gone. */
+  let anchor: (() => Held | null) | null = null
 
   /** The frustum's half-height at zoom 1, in m: more on a tall canvas, so that the start's three cells fit across. */
   const halfHeight = () => Math.max(SPAN, (1.5 * SPAN * height) / width)
@@ -232,9 +235,12 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
         if (flight.t === 1) flight = null
       }
       if (at) {
+        // A point held up high (a Walker on a terrace, #293) is in the middle where the road beyond it, as seen, is.
+        const beyond = (at.h ?? 0) / Math.tan(pose.tilt)
+        const [ax, az] = [at.x - Math.sin(pose.heading) * beyond, -at.y - Math.cos(pose.heading) * beyond]
         const k = 1 - Math.exp(-dt * CLOSING)
-        pose.x = x + (at.x - x) * k
-        pose.z = z + (-at.y - z) * k
+        pose.x = x + (ax - x) * k
+        pose.z = z + (az - z) * k
       }
       place(camera, pose)
     },
@@ -257,12 +263,12 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
       },
 
       /**
-       * Keep the point of the road plane that `at` gives each frame near the middle of the canvas, closing on it and
-       * moving with it, through turns and zooms (a zoom is about the middle while a point is held), until `at` gives
-       * null, `hold(null)` lets go, or the player moves the camera by hand: a drag that pans, a key's slide, `centreOn`,
-       * `frameCity` or `look`.
+       * Keep the point that `at` gives each frame, on the road plane or `h` m above it, near the middle of the canvas,
+       * closing on it and moving with it, through turns and zooms (a zoom is about the middle while a point is held),
+       * until `at` gives null, `hold(null)` lets go, or the player moves the camera by hand: a drag that pans, a key's
+       * slide, `centreOn`, `frameCity` or `look`.
        */
-      hold(at: (() => Vec | null) | null) {
+      hold(at: (() => Held | null) | null) {
         anchor = at
       },
 

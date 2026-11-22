@@ -687,8 +687,9 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   const pools: Pool[] = []
   // What the scene check reads (#191): the ground laid to be kept clear, the scenes and the lots' building forms.
   const claims: Claim[] = []
-  // Where a Walker could go: a door's step, a bench's seat (#288), each riding the next brick closed, as a claim does.
-  const places: (Place & { h?: number; brick: number })[] = []
+  // Where a Walker could go, each riding the next brick closed, as a claim does: a door's step, a bench's seat `h`
+  // above the road (#288), or where one stands on a terrace, `h` above the road, or sits if `sit` (#293).
+  const places: { kind: Place['kind']; x: number; y: number; ry: number; h?: number; sit?: boolean; brick: number }[] = []
   const scenes: Scene[] = []
   const forms: Form[] = []
   let scene = -1 // the scene the bricks closed from now on belong to
@@ -1896,6 +1897,15 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       shadow(x, y, h, 2.8, 1.4, true, ry) // round, as the trees' are: a meadow then draws no other shadow
       places.push({ kind: 'bench', x, y, ry, h, brick: bricks.length }) // the seat's middle is the bench's
       brick('building', x, y, h)
+    },
+
+    /**
+     * Where a Walker can stand on a terrace or a roof garden (#293): at `(x, y)` on ground `h` above the road, facing
+     * `ry` (0 north, π/2 west), or with `sit` sat on a seat there as high as a bench's. They go up to it by the first
+     * door of the brick it rides, so nobody goes up to a terrace whose building has no door.
+     */
+    terrace(x: number, y: number, h: number, ry: number, sit = false) {
+      places.push({ kind: 'terrace', x, y, ry, h, sit, brick: bricks.length })
     },
 
     /** A frame of two swings at `(x, y)`, or of one if `one` (#178), its bar along `ry`'s right, as a brick that pops in (#155). */

@@ -7,10 +7,11 @@ export type Kind = 'shopper' | 'schoolchild' | 'worker'
 
 /**
  * What a Walker is doing (#288): strolling their pavement (or along it to where they leave it for a Place), stopped on
- * it, going off it to a Place, at the Place (indoors, or sat on a bench), or coming back to where they left it. Or
- * (#296) waiting at the kerb for the Walk phase, or crossing the Road in it.
+ * it, going off it to a Place, at the Place (indoors, sat on a bench, or indoors on the way up to a terrace), up on the
+ * terrace and indoors on the way down from it (#293), or coming back to where they left it. Or (#296) waiting at the
+ * kerb for the Walk phase, or crossing the Road in it.
  */
-type Doing = 'stroll' | 'stop' | 'go' | 'act' | 'back' | 'wait' | 'cross'
+type Doing = 'stroll' | 'stop' | 'go' | 'act' | 'up' | 'down' | 'back' | 'wait' | 'cross'
 
 /**
  * A zebra across a Road at a Junction (#296), by its two ends where the Walkers who cross it wait: each on the centre
@@ -59,14 +60,21 @@ interface Crossing {
 
 /**
  * Somewhere a Walker goes to do something (#288), noted as the City is built: a door's step, facing out of the door,
- * or a bench's seat at ground level, facing the way one sat on it looks. On the map, `ry` 0 north and π/2 west.
+ * or a bench's seat at ground level, facing the way one sat on it looks. Or a terrace or a roof garden with room to
+ * stand (#293): the step of the door it is gone up to by, and `up`, where on it one stands, or sits (`sit`), `h` m above
+ * the road, facing `ry`. On the map, `ry` 0 north and π/2 west.
  */
-export interface Place {
-  readonly kind: 'door' | 'bench'
+export type Place = {
   readonly x: number
   readonly y: number
   readonly ry: number
-}
+} & (
+  | { readonly kind: 'door' | 'bench' }
+  | {
+      readonly kind: 'terrace'
+      readonly up: { readonly x: number; readonly y: number; readonly h: number; readonly ry: number; readonly sit: boolean }
+    }
+)
 
 /**
  * The way from a pavement to a Place, round whatever stands between: from `pts[0]`, `s` m round the pavement, to the
@@ -188,6 +196,8 @@ function roll(w: Walker) {
 }
 /** How long `w` strolls before choosing what to do next, s. */
 const strolling = (w: Walker) => 8 + roll(w) * 24
+/** How long `w` is indoors on the way up to a terrace or down from it, by the stairs or the lift, s. */
+const stairs = (w: Walker) => 4 + roll(w) * 3
 
 const wrap = (s: number, length: number) => ((s % length) + length) % length
 /** `p` moved `side` m to the left of `heading`. */
@@ -239,7 +249,7 @@ function nearest(line: Polyline, p: Vec) {
 
 /**
  * What the Walker `side` m to the left of `line` walks of `way`: off the pavement beside it, along each leg of it the
- * same way to the left, to the bench's seat beside the other of a two, or to the door's step itself.
+ * same way to the left, to the bench's seat beside the other of a two, or to the door's step itself (a terrace's too).
  */
 function pathOf(line: Polyline, way: Way, side: number) {
   if (!side) return polyline([...way.pts])
@@ -248,7 +258,7 @@ function pathOf(line: Polyline, way: Way, side: number) {
   for (let i = 1; i < way.pts.length; i++) {
     const [a, b] = [way.pts[i - 1], way.pts[i]]
     const heading = Math.atan2(b.y - a.y, b.x - a.x)
-    const step = i === way.pts.length - 1 && way.place.kind === 'door'
+    const step = i === way.pts.length - 1 && way.place.kind !== 'bench'
     for (const p of [beside(a, heading, side), step ? b : beside(b, heading, side)]) {
       const last = pts[pts.length - 1]
       if (Math.hypot(p.x - last.x, p.y - last.y) > 1e-6) pts.push(p)
@@ -269,7 +279,7 @@ function waysOf(line: Polyline, loop: Vec[], places: readonly Place[], obstacles
   const boxes = obstacles.map((o) => around([...o]))
   const ways: Way[] = []
   for (const place of places) {
-    const out = place.kind === 'door' ? 1 : 0.7 // m in front of a step or a seat to come up to it from
+    const out = place.kind === 'bench' ? 0.7 : 1 // m in front of a seat or a step to come up to it from
     const front = { x: place.x - Math.sin(place.ry) * out, y: place.y + Math.cos(place.ry) * out }
     const { s, d } = nearest(line, front)
     if (!(d < 2.6 || (d < REACH && inside(place, loop)))) continue
@@ -299,16 +309,24 @@ function waysOf(line: Polyline, loop: Vec[], places: readonly Place[], obstacles
 /**
  * Where `w` is on the map, and which way they face: on their pavement, beside the other of a two, stopped facing them,
  * or alone facing in to look in a window; or on their way to a Place, at it facing out of the bench or into the door;
- * or at the kerb facing across, or on their way across, a two side by side.
+ * or at the kerb facing across, or on their way across, a two side by side. Up on a terrace, `h` m above the road
+ * (#293), where it has them stand or sit, beside the other of a two as on a bench; and there still as they go in again
+ * on the way down, so that indoors they are where they were last seen.
  */
-export function whereIs(w: Walker): { x: number; y: number; heading: number } {
+export function whereIs(w: Walker): { x: number; y: number; heading: number; h?: number } {
   if (w.crossing && (w.doing === 'wait' || w.doing === 'cross')) {
     const p = pointAt(w.crossing.path, w.along)
     return { ...beside(p, p.heading, w.side), heading: p.heading }
   }
   if (w.path && w.way) {
+    const { place } = w.way
+    if ((w.doing === 'up' || w.doing === 'down') && place.kind === 'terrace') {
+      const { x, y, h, ry } = place.up
+      const heading = ry + Math.PI / 2
+      return { ...beside({ x, y }, heading + Math.PI, w.side), heading, h }
+    }
     const p = pointAt(w.path, w.along)
-    const { kind, ry } = w.way.place
+    const { kind, ry } = place
     if (w.doing === 'act') return { x: p.x, y: p.y, heading: ry + (kind === 'bench' ? Math.PI / 2 : -Math.PI / 2) }
     return w.doing === 'back' ? { ...p, heading: p.heading + Math.PI } : p
   }
@@ -322,18 +340,31 @@ export function whereIs(w: Walker): { x: number; y: number; heading: number } {
 
 /** What `w` is doing now, in a few words, as the note of a Walker the player Follows says it. */
 export function doingNow(w: Walker): string {
-  const door = w.way?.place.kind === 'door'
+  const place = w.way?.place
+  const bench = place?.kind === 'bench'
   switch (w.doing) {
     case 'stroll':
-      return w.crossing ? 'heading for the crossing' : !w.way ? 'out for a stroll' : door ? 'on an errand' : 'heading for a bench'
+      return w.crossing
+        ? 'heading for the crossing'
+        : !place
+          ? 'out for a stroll'
+          : bench
+            ? 'heading for a bench'
+            : place.kind === 'door'
+              ? 'on an errand'
+              : 'heading for a terrace'
     case 'stop':
       return w.side ? 'stopped for a chat' : 'looking in a window'
     case 'go':
-      return door ? 'going indoors' : 'sitting down on a bench'
+      return bench ? 'sitting down on a bench' : 'going indoors'
     case 'act':
-      return door ? 'indoors' : 'resting on a bench'
+      return bench ? 'resting on a bench' : place?.kind === 'door' ? 'indoors' : 'on the way up'
+    case 'up':
+      return place?.kind === 'terrace' && place.up.sit ? 'sitting out on a terrace' : 'out on a terrace'
+    case 'down':
+      return 'on the way down'
     case 'back':
-      return door ? 'coming back out' : 'getting up from the bench'
+      return bench ? 'getting up from the bench' : 'coming back out'
     case 'wait':
       return 'waiting to cross'
     case 'cross':
@@ -367,10 +398,11 @@ function endsOf(lines: readonly Polyline[], zebras: readonly Zebra[]) {
  * The City's Walkers, each drawn once from the City's seed and the pavement they walk, so that the same City has the
  * same Walkers every time, and a placement, a Swap or an Undo of one Tile changes nobody on the others. Each walks the
  * centre line of one Block's pavement, and leaves it only for a Place on its Block, to go in at a door and come out,
- * or sit on a bench, or to cross the Road at a Signal of their own Tile (#296): they wait at the kerb, facing across,
- * for a Walk phase with time enough left to reach the far kerb, and from there walk the pavement they reached, and go
- * to its Places. What each does, and when, is drawn from their own seed too. A third walk in twos, and a two does all
- * of it together. Nothing in the Sim reads them, and nothing here draws them: `src/render/walkers` does.
+ * sit on a bench, or go in at a door, up onto its building's terrace a while (#293) and back down and out; or to cross
+ * the Road at a Signal of their own Tile (#296): they wait at the kerb, facing across, for a Walk phase with time
+ * enough left to reach the far kerb, and from there walk the pavement they reached, and go to its Places. What each
+ * does, and when, is drawn from their own seed too. A third walk in twos, and a two does all of it together. Nothing
+ * in the Sim reads them, and nothing here draws them: `src/render/walkers` does.
  */
 export class Walkers {
   private walkers: Walker[] = []
@@ -483,13 +515,23 @@ export class Walkers {
       case 'stop':
         if ((w.time -= dt) <= 0) Object.assign(w, { doing: 'stroll', time: strolling(w) })
         break
-      case 'go':
+      case 'go': {
         if ((w.along += pace) < w.path!.length) break
         w.along = w.path!.length
         w.doing = 'act'
-        w.time = w.way!.place.kind === 'door' ? 6 + roll(w) * 8 : 10 + roll(w) * 14
+        const { kind } = w.way!.place
+        w.time = kind === 'door' ? 6 + roll(w) * 8 : kind === 'bench' ? 10 + roll(w) * 14 : stairs(w)
         break
+      }
       case 'act':
+        if ((w.time -= dt) > 0) break
+        if (w.way!.place.kind === 'terrace') Object.assign(w, { doing: 'up', time: 15 + roll(w) * 25 })
+        else w.doing = 'back'
+        break
+      case 'up':
+        if ((w.time -= dt) <= 0) Object.assign(w, { doing: 'down', time: stairs(w) })
+        break
+      case 'down':
         if ((w.time -= dt) <= 0) w.doing = 'back'
         break
       case 'back':
@@ -498,18 +540,24 @@ export class Walkers {
     }
   }
 
-  /** What `w` does next, strolling: stop, go in at a door, sit on a bench, cross the Road at a Signal, or stroll on. */
+  /**
+   * What `w` does next, strolling: stop, go in at a door, sit on a bench, cross the Road at a Signal, or stroll on.
+   * Where their pavement reaches a terrace, half the doors they would go in at are a terrace's instead (#293), so that
+   * elsewhere nothing changes.
+   */
   private choose(w: Walker, leftToCross: LeftToCross) {
     const r = roll(w)
     if (r >= 0.8) {
       if (r >= 0.95 || !this.crossAt(w, leftToCross)) w.time = strolling(w)
       return
     }
-    const kind = r < 0.3 ? undefined : r < 0.6 ? 'door' : 'bench'
     const { length } = w.line
     const gap = (way: Way) => Math.min(wrap(way.s - w.s, length), wrap(w.s - way.s, length))
-    const ways = (this.pavements.find((p) => p.line === w.line)?.ways ?? [])
-      .filter((way) => way.place.kind === kind && (way.two || !w.side))
+    const open = (this.pavements.find((p) => p.line === w.line)?.ways ?? []).filter((way) => way.two || !w.side)
+    const goesUp = r >= 0.45 && r < 0.6 && open.some((way) => way.place.kind === 'terrace')
+    const kind = r < 0.3 ? undefined : goesUp ? 'terrace' : r < 0.6 ? 'door' : 'bench'
+    const ways = open
+      .filter((way) => way.place.kind === kind)
       .sort((a, b) => gap(a) - gap(b))
       .slice(0, 3)
     if (!ways.length) {
