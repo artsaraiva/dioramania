@@ -255,6 +255,23 @@ export function whereIs(w: Walker): { x: number; y: number; heading: number } {
   return { ...at, heading: p.heading + (left ? Math.PI / 2 : -Math.PI / 2) }
 }
 
+/** What `w` is doing now, in a few words, as the note of a Walker the player Follows says it. */
+export function doingNow(w: Walker): string {
+  const door = w.way?.place.kind === 'door'
+  switch (w.doing) {
+    case 'stroll':
+      return !w.way ? 'out for a stroll' : door ? 'on an errand' : 'heading for a bench'
+    case 'stop':
+      return w.side ? 'stopped for a chat' : 'looking in a window'
+    case 'go':
+      return door ? 'going indoors' : 'sitting down on a bench'
+    case 'act':
+      return door ? 'indoors' : 'resting on a bench'
+    case 'back':
+      return door ? 'coming back out' : 'getting up from the bench'
+  }
+}
+
 /**
  * The City's Walkers, each drawn once from the City's seed and the pavement they walk, so that the same City has the
  * same Walkers every time, and a placement, a Swap or an Undo of one Tile changes nobody on the others. Each walks the
@@ -274,6 +291,11 @@ export class Walkers {
   /** Every Walker, in the order their Tiles were added, and each of a two after the one they walk beside. */
   get all(): readonly Walker[] {
     return this.walkers
+  }
+
+  /** The other of `w`'s two: the one they walk beside, or the one who walks beside them. */
+  otherOfTwo(w: Walker): Walker | undefined {
+    return w.lead ?? this.walkers.find((other) => other.lead === w)
   }
 
   /**

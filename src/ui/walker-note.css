@@ -1,0 +1,64 @@
+/* The note of the Walker followed (./walker-note.ts; #289): a paper note in the left slot (./screen.css), laid out as
+   the Junction's note is. */
+.walker-note {
+  position: relative;
+  width: 280px;
+  padding: 22px 22px 18px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.walker-note .tape {
+  left: 96px;
+  top: -10px;
+  width: 86px;
+}
+/* The name and what they do. Not `.title`, the title screen's root, whose fixed position would pin them over the
+   tape. */
+.walker-note .heading {
+  display: grid;
+  gap: 2px;
+}
+.walker-note h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+.walker-note .job {
+  font-size: 15px;
+  color: var(--quiet);
+}
+/* Who they are, a label to the left of each line, which wraps under itself. */
+.walker-note dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.walker-note dt {
+  font-size: 15px;
+  color: var(--quiet);
+}
+.walker-note dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.walker-note .now {
+  margin: -4px 0 0;
+  font-size: 18px;
+}
+.walker-note .actions {
+  display: flex;
+}
+.walker-note .actions .button {
+  flex: 1;
+  height: 44px;
+  border-width: 2px;
+  border-radius: 8px;
+  font-size: 15px;
+}

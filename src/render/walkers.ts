@@ -17,6 +17,13 @@ const phaseOf = (walker: Walker) => ((walker.seed >>> 3) % 1000) / 100
 const talks = (walker: Walker) => walker.seed % 5 < 3
 const SEAT = 0.52 // m up from the pavement the top of a bench's seat is
 const EASE = 5 // how quickly a walker sits, gets up, stops swinging and turns, per s
+// The marker over the Walker followed (#289): the prototype's yellow gem, `size` m tall, at least `least` px tall on
+// screen however far out, `over` its own height above the head, bobbing and turning, rimmed `rim` of its size in the
+// kit's ink (src/ui/kit.css).
+const MARKER = { colour: '#ffd35c', ink: '#2b2622', size: 0.84, least: 22, over: 0.9, rim: 0.16 }
+// A click on a Walker: within `reach` m of the line from their feet to the top of their head, and by default `slack` px
+// more, so that one is easy to hit far out.
+const PICK = { reach: 0.3, slack: 4 }
 
 const [BODY, LEFT_LEG, RIGHT_LEG, LEFT_ARM, RIGHT_ARM, HEAD] = [0, 1, 2, 3, 4, 5]
 const SWING = 0.62 // how far a leg swings either way, in radians
@@ -142,16 +149,32 @@ const jointed = (shader: THREE.WebGLProgramParametersWithUniforms) => {
     )
 }
 
+/** How far the point `(px, py)` is from the segment `(ax, ay)`–`(bx, by)`. */
+function toSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+  const [dx, dy] = [bx - ax, by - ay]
+  const t = dx || dy ? Math.min(1, Math.max(0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))) : 0
+  return Math.hypot(px - ax - dx * t, py - ay - dy * t)
+}
+
 /**
  * The City's Walkers on the pavement, one instanced mesh per kind (#176), as `../walkers/walkers` has them: who each
  * is, where they walk and what they do comes from there, seeded `seed`, the City's. Each faces the way it walks, its
  * legs and arms swinging in step with the ground it covers (#287), and stops swinging as it stops (#288): it goes out
  * of sight in at a door, sits down on a bench, turns its head about, and stopped, or sat beside the other of a two, talks with a hand;
- * its shadow moves with it.
+ * its shadow moves with it. The one the player Follows (#289) wears a marker over their head, in `marker`, a screen
+ * piece drawn over the blend: indoors, it waits over the door.
  */
 export function createWalkers(seed: number) {
   const group = new THREE.Group()
   const models = new Map(ORDER.map((k) => [k, model(FIGURES[k].parts(FIGURES[k].hip))]))
+  // How tall each kind stands, to the top of its head.
+  const tall = new Map(
+    ORDER.map((k) => {
+      const g = models.get(k)!
+      g.computeBoundingBox()
+      return [k, g.boundingBox!.max.y]
+    }),
+  )
   const clothes = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: LOW_POLY })
   clothes.onBeforeCompile = (shader) => {
     takesPaint(shader)
@@ -174,6 +197,32 @@ export function createWalkers(seed: number) {
     Walker,
     { stride: number; swing: number; sit: number; size: number; arm: number; x: number; y: number; heading: number }
   >()
+  /** How high the soles of `walker`'s feet are, shown as `look`: lower as they sit. */
+  const footOf = (walker: Walker, look: { sit: number }) => KERB - look.sit * (FIGURES[walker.kind].hip - SEAT)
+
+  /** The Walker the player Follows, and the marker over them. */
+  let followed: Walker | null = null
+  // Unlit, so it reads the same by night, each face a tone of its own, its top faces lighter: it glints as it turns.
+  const facets = new THREE.OctahedronGeometry(0.5).scale(MARKER.size * 0.67, MARKER.size, MARKER.size * 0.67)
+  const tones = new Float32Array(facets.attributes.position.count * 3)
+  const yellow = new THREE.Color(MARKER.colour)
+  for (let face = 0; face < tones.length / 9; face++) {
+    const y = [0, 1, 2].reduce((sum, k) => sum + facets.attributes.position.getY(face * 3 + k), 0)
+    const [up, round] = [y > 0 ? 1 : 0.72, 0.88 + 0.12 * Math.cos(face * 2.1)]
+    const tone = yellow.clone().multiplyScalar(up * round)
+    for (let k = 0; k < 3; k++) tones.set([tone.r, tone.g, tone.b], face * 9 + k * 3)
+  }
+  facets.setAttribute('color', new THREE.BufferAttribute(tones, 3))
+  // Drawn with what is see-through, in its render order, so nothing see-through drawn after it covers it.
+  const unlit = { transparent: true, depthTest: false, depthWrite: false, toneMapped: false }
+  const gem = new THREE.Mesh(facets, new THREE.MeshBasicMaterial({ ...unlit, vertexColors: true }))
+  const rim = new THREE.Mesh(facets, new THREE.MeshBasicMaterial({ ...unlit, color: MARKER.ink, side: THREE.BackSide }))
+  rim.scale.setScalar(1 + MARKER.rim)
+  // Over the Jam marks' bubbles and the tools' marks, under the hand; the gem over its rim.
+  ;[rim.renderOrder, gem.renderOrder] = [15, 16]
+  const marker = new THREE.Group().add(rim, gem)
+  marker.name = 'walker marker'
+  marker.visible = false
 
   /** New instanced meshes for the walkers there are now. */
   const remesh = () => {
@@ -199,6 +248,41 @@ export function createWalkers(seed: number) {
   }
   return {
     group,
+    marker,
+
+    /** The Walker the player Follows, if any: a Swap or an Undo that takes them off lets go of them. */
+    get followed() {
+      return followed
+    },
+
+    /** Follow `walker`, or nobody. */
+    follow(walker: Walker | null) {
+      followed = walker
+    },
+
+    /** The other of `walker`'s two, if they walk in one. */
+    otherOfTwo: (walker: Walker) => walkers.otherOfTwo(walker),
+
+    /**
+     * The Walker drawn nearest the canvas pixel (`px`, `py`), if the pixel is on their figure or within `slack` px of
+     * it, where `onScreen` puts a point `up` m over the map on the canvas and a pixel spans `perPixel` m: nobody out of
+     * sight indoors.
+     * ponytail: every Walker's figure is put on the canvas, on each move of the pointer too, about 35 µs on the 26-Tile
+     * City (M4 Pro); keep the Walkers by Tile and look only under the pointer if a larger City shows it.
+     */
+    at(px: number, py: number, onScreen: (at: Vec, up: number) => [number, number], perPixel: number, slack = PICK.slack): Walker | null {
+      let [best, found] = [PICK.reach / perPixel + slack, null as Walker | null]
+      for (const walker of walkers.all) {
+        const look = shown.get(walker)
+        if (!look || look.size < 0.5) continue
+        const foot = footOf(walker, look)
+        const [fx, fy] = onScreen(look, foot)
+        const [hx, hy] = onScreen(look, foot + tall.get(walker.kind)! * look.size)
+        const d = toSegment(px, py, fx, fy, hx, hy)
+        if (d < best) [best, found] = [d, walker]
+      }
+      return found
+    },
 
     /**
      * Walkers on the pavement of the pieces of slab `pieces`, laid in `field`, and their ways to `places`, round
@@ -227,11 +311,12 @@ export function createWalkers(seed: number) {
     /** Take the walkers off the pieces of slab `pieces`, which a Swap or an Undo is lifting. */
     remove(pieces: Bounds[]) {
       walkers.takeOff(pieces)
+      if (followed && !walkers.all.includes(followed)) followed = null
       remesh()
     },
 
-    /** `dt` is the real seconds since the last frame, 0 while paused. */
-    update(dt: number) {
+    /** `dt` is the real seconds since the last frame, 0 while paused; `perPixel`, the m of ground a CSS pixel spans. */
+    update(dt: number, perPixel: number) {
       t += dt
       walkers.step(dt)
       const index = new Map<Kind, number>(ORDER.map((k) => [k, 0]))
@@ -259,7 +344,7 @@ export function createWalkers(seed: number) {
             : moving
               ? Math.sin(t * 0.5 + phase) * 0.18
               : Math.sin(t * 0.9 + phase) * 0.5
-        at.set(look.x, KERB - look.sit * (FIGURES[walker.kind].hip - SEAT), -look.y)
+        at.set(look.x, footOf(walker, look), -look.y)
         q.setFromAxisAngle(up, look.heading)
         const i = index.get(walker.kind)!
         index.set(walker.kind, i + 1)
@@ -272,6 +357,15 @@ export function createWalkers(seed: number) {
         mesh.instanceMatrix.needsUpdate = true
         mesh.geometry.attributes.pose.needsUpdate = true
       }
+      const look = followed && shown.get(followed)
+      marker.visible = !!look
+      if (!followed || !look) return
+      // As tall as it is, or as the least it shows on screen, and its height again over the head, as they stand indoors.
+      const size = Math.max(1, (MARKER.least * perPixel) / MARKER.size)
+      const top = footOf(followed, look) + tall.get(followed.kind)!
+      marker.position.set(look.x, top + MARKER.size * size * (MARKER.over + Math.sin(t * 3) * 0.12), -look.y)
+      marker.scale.setScalar(size)
+      gem.rotation.y = rim.rotation.y = t * 1.5
     },
   }
 }

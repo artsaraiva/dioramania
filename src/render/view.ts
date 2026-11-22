@@ -4,6 +4,7 @@ import type { Stage } from '../game/game'
 import { extent, sameBounds, type Bounds, type Vec } from '../sim/geometry'
 import type { Junction } from '../sim/network'
 import type { Sim, Vehicle } from '../sim/sim'
+import { whereIs, type Walker } from '../walkers/walkers'
 import { createCamera, type ScreenPoint } from './camera'
 import { carCentre, createCars } from './cars'
 import { createBlend } from './blend'
@@ -215,6 +216,7 @@ export function createView(
     signals.group,
     ...cars.meshes,
     walkers.group,
+    walkers.marker,
     sky.group,
     emotion.group,
     tools.group,
@@ -242,7 +244,7 @@ export function createView(
   // Low poly (`./look`), the scene is drawn through the blend; the screen's own pieces are drawn over it, out of its lens.
   const blend = LOW_POLY
     ? createBlend(renderer, scene, rig.camera, {
-        screen: [emotion.group, tools.group, route.group, hand.group, rezoning.group],
+        screen: [emotion.group, tools.group, route.group, walkers.marker, hand.group, rezoning.group],
         lights: day.lights.filter((o) => o instanceof THREE.Light),
       })
     : null
@@ -344,6 +346,8 @@ export function createView(
     const hit = raycaster.ray.intersectPlane(roadPlane, new THREE.Vector3())
     return hit ? { x: hit.x, y: -hit.z } : null
   }
+  /** m of ground a CSS pixel spans, the camera being orthographic. */
+  const perPixel = () => (rig.camera.top - rig.camera.bottom) / rig.camera.zoom / height
   /** Metres of road under `px` pixels at the pointer, the most in any direction (the tilt foreshortens the board's depth). */
   const metres = (e: ScreenPoint, px: number) => {
     const p = pick(e)
@@ -408,6 +412,30 @@ export function createView(
       }
       return shown.vehicles.reduce<Vehicle | null>((best, v) => (gap(v) < (best ? gap(best) : CAR_PICK) ? v : best), null)
     },
+
+    /** The Walker under the pointer: on their figure, or within `slack` px of it (by default a few). */
+    walkerAt(e: ScreenPoint, slack?: number): Walker | null {
+      const r = canvas.getBoundingClientRect()
+      return walkers.at(e.clientX - r.left, e.clientY - r.top, rig.controls.onScreen, perPixel(), slack)
+    },
+
+    /**
+     * Follow `walker` (#289): a marker over their head, and the camera keeps them near the middle of the canvas
+     * through turns and zooms, until the player moves it by hand (`camera.hold`), a Swap or an Undo takes them off, or
+     * `follow(null)`. Following another lets go of the one before.
+     */
+    follow(walker: Walker | null) {
+      walkers.follow(walker)
+      rig.controls.hold(walker && (() => (walkers.followed === walker ? whereIs(walker) : null)))
+    },
+
+    /** The Walker followed, if any. */
+    get followed() {
+      return walkers.followed
+    },
+
+    /** The other of `walker`'s two, if they walk in one. */
+    otherOfTwo: walkers.otherOfTwo,
 
     /** Show the Tools in the world as `state` has them. */
     showTools(state: ToolState) {
@@ -624,11 +652,14 @@ export function createView(
       materials.setZoom(rig.camera.zoom)
       cars.setGlow(glow)
       emotion.update(cars.update(shown.vehicles, dt, calm), dt)
-      walkers.update(dt)
-      // m to a CSS pixel: the captions over the hand and a rezoning keep their lines readable however far out.
-      const perPixel = (rig.camera.top - rig.camera.bottom) / rig.camera.zoom / height
-      hand.update(perPixel)
-      rezoning.update(perPixel)
+      // The camera let go of the Walker followed, moved by hand: so does the view.
+      if (walkers.followed && !rig.controls.holding) walkers.follow(null)
+      // The captions over the hand and a rezoning, and the marker over the Walker followed, keep a size to read however
+      // far out.
+      const metres = perPixel()
+      walkers.update(dt, metres)
+      hand.update(metres)
+      rezoning.update(metres)
       tools.update()
       // The give-way paint shows the traffic's Priorities, whatever network the paint stands on: an Assembly's once its
       // plate has landed.
