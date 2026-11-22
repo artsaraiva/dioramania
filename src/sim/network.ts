@@ -65,6 +65,8 @@ export interface Arm {
   light?: Light
   /** Where the Arm meets the Ring, or the mouth of a Priority junction. */
   center: Vec
+  /** m across the Road's lanes, from kerb to kerb: what a Walker crosses at its zebra. */
+  width: number
   approach: Lane[]
   exit: Lane[]
   /** Ring lanes arriving at this Arm, and departing from it. */
@@ -229,6 +231,7 @@ export function buildNetwork(network: NetworkSpec, { conflicts = true } = {}): N
         // A Priority junction's Arms start with no sign. A roundabout's always yield to its Ring.
         priority: junction.type === 'roundabout' ? 'yield' : 'main',
         center: junction.at,
+        width: (nForward + nBackward) * laneWidth,
         approach,
         exit,
         ringIn: [],

@@ -3,6 +3,7 @@ import type { Cell, Zone } from '../city/city'
 import type { Stage } from '../game/game'
 import { extent, sameBounds, type Bounds, type Vec } from '../sim/geometry'
 import type { Junction } from '../sim/network'
+import { leftToCross } from '../sim/signals'
 import type { Sim, Vehicle } from '../sim/sim'
 import { whereIs, type Walker } from '../walkers/walkers'
 import { createCamera, type ScreenPoint } from './camera'
@@ -607,7 +608,8 @@ export function createView(
     /**
      * Draw a frame. `dt` is the real seconds since the last one, 0 while the sim is paused: it drives everything that
      * moves on its own (the sky, the walkers and the Jam emotion), so a pause stops the whole world. The day shows the
-     * time of day the Sim's clock reads, and the movers work at the Sim's pace, so both stop with it too. An Assembly
+     * time of day the Sim's clock reads, the movers work at the Sim's pace, and the walkers wait at the kerb and cross
+     * the Road at it, so that they cross in the Walk phase at any speed of the game: all stop with it too. An Assembly
      * plays on its own clock: the caller keeps `dt` running while one plays (`assembling`).
      * `real` is the real seconds paused or not: the camera keeps moving while the world is paused.
      */
@@ -646,7 +648,8 @@ export function createView(
       stageInspector.update(real)
       const glow = day.update(shown.timeOfDay)
       // Never back: the movers' work only adds up, and every Sim shown carries on the clock of the one before.
-      movers.update(dt, Math.max(0, shown.time - simTimeDrawn), day.time, glow)
+      const simDt = Math.max(0, shown.time - simTimeDrawn)
+      movers.update(dt, simDt, day.time, glow)
       simTimeDrawn = shown.time
       materials.setGlow(glow)
       materials.setZoom(rig.camera.zoom)
@@ -657,7 +660,11 @@ export function createView(
       // The captions over the hand and a rezoning, and the marker over the Walker followed, keep a size to read however
       // far out.
       const metres = perPixel()
-      walkers.update(dt, metres)
+      const junctions = new Map(shown.net.junctions.map((j) => [j.id, j]))
+      walkers.update(dt, metres, simDt, (id: string) => {
+        const junction = junctions.get(id)
+        return junction && leftToCross(junction)
+      })
       hand.update(metres)
       rezoning.update(metres)
       tools.update()
