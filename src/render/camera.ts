@@ -24,6 +24,7 @@ const WHEEL = 0.95 // the zoom is multiplied by this for each 100 px the wheel t
 // this many pixels of wheel do, about 2.5 times.
 const HELD = { slide: 0.8, turn: 1.6, wheel: 1800 }
 const FLIGHT = 0.7 // s for a move the player asks for, or that brings a new Tile into view
+const CLOSING = 3 // how quickly the camera closes on the point it holds (a Walker followed), per s
 const SLAB_DEPTH = 19 // m from the road plate down to the slab's underside, whose sides frame the City
 // The margins of the canvas the screen's furniture covers (src/ui), in CSS pixels, with a little room: the stickers
 // top-left reach 74 px down, the camera's stickers on the right edge 74 px in, and the toolbar 144 px up, 152 px with a
@@ -67,7 +68,7 @@ const corners = (b: Bounds, heights: number[]): [number, number, number][] =>
  * The orthographic camera, for a City with no bounds. The screen moves it through `controls`: `pan` and `rotate`
  * follow drags, `zoomAt` the wheel and `drive` the keys, and `northUp`, `frameCity`, `toggleTilt` and `centreOn` fly it to a new view.
  * It opens at City zoom, from the south-east, and as the City changes it stays where it is unless `bringIn`
- * is asked to show a Tile off screen.
+ * is asked to show a Tile off screen. `hold` keeps a point that moves (a Walker followed) near the middle of the canvas.
  */
 export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 3000)
@@ -77,6 +78,8 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
   let pose: Pose = { x: 0, z: 0, heading: START_HEADING, tilt: TILT.start, zoom: 1 }
   let opened = false // whether the start view has framed the City, which waits for the canvas to have a size
   let flight: { from: Pose; to: Pose; t: number } | null = null
+  /** Where the point the camera holds near the middle of the canvas is now, or null once it is gone. */
+  let anchor: (() => Vec | null) | null = null
 
   /** The frustum's half-height at zoom 1, in m: more on a tall canvas, so that the start's three cells fit across. */
   const halfHeight = () => Math.max(SPAN, (1.5 * SPAN * height) / width)
@@ -205,22 +208,35 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
       if (middle) fly({ ...to, x: middle.x, z: middle.z })
     },
 
-    /** `dt` is the real seconds since the last frame, paused or not: a flight carries on while the world is paused. */
+    /**
+     * `dt` is the real seconds since the last frame, paused or not: a flight carries on while the world is paused, and
+     * so does closing on a point held, which a flight then only turns, tilts or zooms about.
+     */
     update(dt: number) {
-      if (!flight) return
-      flight.t = Math.min(1, flight.t + dt / FLIGHT)
-      const k = flight.t * flight.t * (3 - 2 * flight.t)
-      const { from, to } = flight
-      const lerp = (a: number, b: number) => a + (b - a) * k
-      pose = {
-        x: lerp(from.x, to.x),
-        z: lerp(from.z, to.z),
-        heading: wrap(from.heading + wrap(to.heading - from.heading) * k), // the short way round
-        tilt: lerp(from.tilt, to.tilt),
-        zoom: from.zoom * Math.pow(to.zoom / from.zoom, k), // evenly in scale
+      const at = anchor?.() ?? null
+      if (!at) anchor = null
+      if (!flight && !at) return
+      const [x, z] = [pose.x, pose.z]
+      if (flight) {
+        flight.t = Math.min(1, flight.t + dt / FLIGHT)
+        const k = flight.t * flight.t * (3 - 2 * flight.t)
+        const { from, to } = flight
+        const lerp = (a: number, b: number) => a + (b - a) * k
+        pose = {
+          x: lerp(from.x, to.x),
+          z: lerp(from.z, to.z),
+          heading: wrap(from.heading + wrap(to.heading - from.heading) * k), // the short way round
+          tilt: lerp(from.tilt, to.tilt),
+          zoom: from.zoom * Math.pow(to.zoom / from.zoom, k), // evenly in scale
+        }
+        if (flight.t === 1) flight = null
+      }
+      if (at) {
+        const k = 1 - Math.exp(-dt * CLOSING)
+        pose.x = x + (at.x - x) * k
+        pose.z = z + (-at.y - z) * k
       }
       place(camera, pose)
-      if (flight.t === 1) flight = null
     },
 
     /** What the screen moves the camera with, and reads it by. */
@@ -235,14 +251,29 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
         return pose.tilt
       },
 
+      /** Whether the camera holds a point near the middle of the canvas (`hold`). */
+      get holding() {
+        return anchor !== null
+      },
+
+      /**
+       * Keep the point of the road plane that `at` gives each frame near the middle of the canvas, closing on it and
+       * moving with it, through turns and zooms (a zoom is about the middle while a point is held), until `at` gives
+       * null, `hold(null)` lets go, or the player moves the camera by hand: a drag that pans, a key's slide, `centreOn`,
+       * `frameCity` or `look`.
+       */
+      hold(at: (() => Vec | null) | null) {
+        anchor = at
+      },
+
       /** Whether the camera looks down from the steepest tilt it allows. */
       get steep() {
         return Math.abs(pose.tilt - TILT.steep) < 0.01
       },
 
-      /** Where the point `at` of the road plane is on the canvas, in CSS pixels from its top-left corner. */
-      onScreen(at: Vec): [number, number] {
-        return onCanvas(camera, [at.x, 0, -at.y])
+      /** Where the point `at`, `up` m above the road plane, is on the canvas, in CSS pixels from its top-left corner. */
+      onScreen(at: Vec, up = 0): [number, number] {
+        return onCanvas(camera, [at.x, up, -at.y])
       },
 
       /**
@@ -251,7 +282,7 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
        * title screen's. Unlike the player's zoom, `zoom` has no limits.
        */
       look(at: Vec, zoom: number, right = 0, down = 0) {
-        flight = null
+        flight = anchor = null
         opened = true
         pose = { ...pose, x: at.x, z: -at.y, zoom }
         place(camera, pose)
@@ -262,12 +293,13 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
 
       /** Fly to put the point `at` of the road plane at the middle of the canvas, keeping the heading, tilt and zoom. */
       centreOn(at: Vec) {
+        anchor = null
         fly({ ...destination(), x: at.x, z: -at.y })
       },
 
       /** Move the world on screen as a drag from `from` to `to` does: the ground under the pointer stays under it. */
       pan(from: ScreenPoint, to: ScreenPoint) {
-        flight = null
+        flight = anchor = null
         const [a, b] = [roadUnder(camera, ...local(from)), roadUnder(camera, ...local(to))]
         if (!a || !b) return
         pose.x += a.x - b.x
@@ -289,7 +321,8 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
        */
       zoomAt(at: ScreenPoint, deltaY: number) {
         flight = null
-        zoomAbout(...local(at), deltaY)
+        if (anchor) zoomAbout(width / 2, height / 2, deltaY)
+        else zoomAbout(...local(at), deltaY)
       },
 
       /**
@@ -297,18 +330,19 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
        * `turn` turns the world clockwise about the middle of the canvas, and `zoom` comes closer to it, each from -1 to
        * 1 and `rate` times as fast. The slide is a share of the screen, so it covers less ground the closer the camera.
        */
-      drive(held: Drive, dt: number, rate = 1) {
-        if (!held.right && !held.up && !held.turn && !held.zoom) return
+      drive(keys: Drive, dt: number, rate = 1) {
+        if (!keys.right && !keys.up && !keys.turn && !keys.zoom) return
         flight = null
+        if (keys.right || keys.up) anchor = null
         const step = rate * dt
-        pose.heading = wrap(pose.heading + held.turn * HELD.turn * step)
+        pose.heading = wrap(pose.heading + keys.turn * HELD.turn * step)
         // Across the screen a metre of ground is a metre; up it, the tilt foreshortens the ground.
         const slide = ((2 * halfHeight()) / pose.zoom) * HELD.slide * step
-        const [across, away] = [held.right * slide, (held.up * slide) / Math.sin(pose.tilt)]
+        const [across, away] = [keys.right * slide, (keys.up * slide) / Math.sin(pose.tilt)]
         pose.x += Math.cos(pose.heading) * across - Math.sin(pose.heading) * away
         pose.z += -Math.sin(pose.heading) * across - Math.cos(pose.heading) * away
         place(camera, pose)
-        if (held.zoom) zoomAbout(width / 2, height / 2, -held.zoom * HELD.wheel * step)
+        if (keys.zoom) zoomAbout(width / 2, height / 2, -keys.zoom * HELD.wheel * step)
       },
 
       /** Turn north up. */
@@ -318,6 +352,7 @@ export function createCamera(canvas: HTMLCanvasElement, slab: Bounds) {
 
       /** Frame the whole City, from the heading and tilt the camera has. */
       frameCity() {
+        anchor = null
         fly(framing(destination()))
       },
 

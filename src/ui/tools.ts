@@ -45,8 +45,9 @@ const END = mark('<circle cx="64" cy="64" r="49" fill="currentColor"/><circle cx
  * A click on the round marker at an Arm's line, or on the paint of its sign, takes its Priority rule round: no sign, a
  * yield sign, a stop sign. A drag from an incoming lane end to a legal outgoing one turns that Connection on, or off
  * if it was on; so does a click on each in turn. A click on
- * a car shows its route. `Esc`, a click on empty board, Done or selecting something else lets go. While `busy` (a Layout
- * in the hand) nothing is selectable.
+ * a car shows its route, and a click on a Walker follows them (#289; `./walker-note`): inside a Junction's halo only
+ * on their figure itself, and never on a mark of the Tools. `Esc`, a click on empty board, Done or selecting something
+ * else lets go. While `busy` (a Layout in the hand) nothing is selectable, and nobody is followed.
  *
  * The page routes presses on the board here (`watchPresses`): `press` takes the ones that draw a Connection, and `click`
  * gets every other click. The Tools follow the pointer themselves for the hover.
@@ -125,7 +126,10 @@ export function createTools(note: HTMLElement, canvas: HTMLCanvasElement, game: 
     selected = junction
     under = null
     letGo()
-    if (junction) view.inspectCar(null)
+    if (junction) {
+      view.inspectCar(null)
+      view.follow(null)
+    }
     describe()
     show()
   }
@@ -155,13 +159,20 @@ export function createTools(note: HTMLElement, canvas: HTMLCanvasElement, game: 
   const hover = (e: PointerEvent) => {
     if (busy()) return
     if (from) follow(e)
-    // While the camera is dragged, nothing lifts under the pointer.
+    // While the camera is dragged, nothing lifts under the pointer. Over a Walker, whom a click follows, no halo lifts.
     const board = e.buttons === 0 && e.target === canvas
-    hovered = board ? view.junctionAt(e) : null
     under = board && selected ? view.toolAt(e, selected) : null
-    if (e.buttons === 0) point(board && ((hovered && hovered !== selected) || under) ? 'pointer' : rest)
+    const walker = board && !under && walkerAt(e)
+    hovered = board && !walker ? view.junctionAt(e) : null
+    if (e.buttons === 0) point(board && (walker || (hovered && hovered !== selected) || under) ? 'pointer' : rest)
     show()
   }
+
+  /**
+   * The Walker a click at `e` follows: in a Junction's halo, only one whose figure it is on, so that the Junction stays
+   * easy to hit.
+   */
+  const walkerAt = (e: ScreenPoint) => view.walkerAt(e, view.junctionAt(e) ? 0 : undefined)
 
   /** Where a Connection being drawn is let go: on a legal lane end it turns that Connection on, or off; anywhere else nothing changes. */
   const land = (e: PointerEvent) => {
@@ -211,13 +222,20 @@ export function createTools(note: HTMLElement, canvas: HTMLCanvasElement, game: 
     if (busy()) return
     letGo()
     const t = selected && view.toolAt(e, selected)
+    const walker = !t && walkerAt(e)
     const junction = view.junctionAt(e)
     if (t?.kind === 'rule') flip(t.arm)
+    else if (walker) {
+      select(null)
+      view.inspectCar(null)
+      view.follow(walker)
+    }
     // Anywhere else on the selected Junction, a click only lets go of a picked lane end.
     else if (!t && !(selected && junction === selected)) {
-      // A car or empty board lets the Junction go.
+      // A car or empty board lets the Junction go, and the Walker followed.
       const car = junction ? null : view.carAt(e)
       select(junction)
+      view.follow(null)
       if (!junction) view.inspectCar(car)
     }
     hover(e)
@@ -276,7 +294,7 @@ export function createTools(note: HTMLElement, canvas: HTMLCanvasElement, game: 
       show()
     },
 
-    /** `Esc`: let go of the Connection being drawn, then of the selection and the route. */
+    /** `Esc`: let go of the Connection being drawn, then of the selection, the route and the Walker followed. */
     back() {
       if (from) {
         letGo()
@@ -284,11 +302,16 @@ export function createTools(note: HTMLElement, canvas: HTMLCanvasElement, game: 
       }
       select(null)
       view.inspectCar(null)
+      view.follow(null)
     },
 
-    /** Call it every frame: with a Layout in the hand, nothing stays selected, and the stamp follows the Jams. */
+    /**
+     * Call it every frame: with a Layout in the hand, nothing stays selected and nobody followed, so the board holds
+     * still under it, and the stamp follows the Jams.
+     */
     update() {
       if (busy() && (selected || hovered)) clear()
+      if (busy() && view.followed) view.follow(null)
       stamp()
     },
   }
