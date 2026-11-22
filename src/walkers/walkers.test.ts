@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { sameBounds, type Bounds } from '../sim/geometry'
 import { cellBounds } from '../sim/tiles'
-import { Walkers, type Place } from './walkers'
+import { whereIs, Walkers, type Place, type Walker } from './walkers'
 
 /** The pavement round a square Block `inset` m in from the edges of `tile`. */
 function pavement(tile: Bounds, inset: number) {
@@ -93,4 +93,54 @@ it('what each Walker does comes from the City’s seed', () => {
   expect(seen(7)).toEqual(seven)
   expect(seen(8)).not.toEqual(seven)
   expect(['act:door', 'act:bench'].every((act) => seven.flat().some((w) => w.startsWith(act)))).toBe(true)
+})
+
+// Crossing at a Signal
+
+// Across the west Tile from west to east, a Road 28 m wide between kerbs at y = ±14, and the pavements of the Blocks
+// either side of it 1.6 m in from each kerb. At x = 0 the zebra of the Junction X crosses it, from one pavement to the
+// other: 31.2 m.
+const [SOUTH, NORTH] = [box(-40, -40, 40, -15.6), box(-40, 15.6, 40, 40)]
+const ZEBRA = {
+  junction: 'X',
+  ends: [
+    { x: 0, y: -15.6 },
+    { x: 0, y: 15.6 },
+  ],
+} as const
+
+/**
+ * Twenty minutes of the Walkers of the west Tile, the lights of X showing `walkLeft` s of the Walk phase left at each
+ * second of the Sim's clock (undefined: X has no Signal): whether anyone was in the Road while it was not the Walk
+ * phase, how many got across to the other Block, and how many were seen waiting at the kerb.
+ */
+function crossing(walkLeft: (t: number) => number | undefined) {
+  const walkers = new Walkers(7)
+  walkers.add(WEST, [SOUTH, NORTH], [], [], [ZEBRA])
+  const north = new Map(walkers.all.map((w) => [w, whereIs(w).y > 0]))
+  const seen = { outOfPhase: false, across: new Set<Walker>(), waited: new Set<Walker>() }
+  for (let t = 0; t < 1200; t += 0.1) {
+    walkers.step(0.1, (junction) => (junction === 'X' ? walkLeft(t + 0.1) : undefined))
+    for (const w of walkers.all) {
+      const { y } = whereIs(w)
+      if (Math.abs(y) < 14 && !walkLeft(t + 0.1)) seen.outOfPhase = true
+      if (Math.abs(y) > 15 && y > 0 !== north.get(w)) seen.across.add(w)
+      if (w.doing === 'wait') seen.waited.add(w)
+    }
+  }
+  return seen
+}
+
+it('a Walker starts across a Road only in the Walk phase, with time enough left to reach the far kerb', () => {
+  // A cycle of a minute whose first 30 s are the Walk phase: Walkers cross, and nobody is caught in the Road.
+  const cycle = crossing((t) => Math.max(0, 30 - (t % 60)))
+  expect(cycle.across.size).toBeGreaterThan(3)
+  expect(cycle.outOfPhase).toBe(false)
+  // A Walk phase that never has long enough left to cross 31 m at a brisk pace: they wait, and nobody starts across.
+  const short = crossing(() => 12)
+  expect(short.waited.size).toBeGreaterThan(3)
+  expect(short.across.size).toBe(0)
+  // No Signal at X: nobody waits for one, or crosses.
+  const none = crossing(() => undefined)
+  expect(none.waited.size + none.across.size).toBe(0)
 })
