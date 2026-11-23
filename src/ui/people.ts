@@ -1,5 +1,5 @@
 import type { View } from '../render/view'
-import { doingNow, type Ended, type Walker } from '../walkers/walkers'
+import type { Ended, Walker } from '../walkers/walkers'
 import { emptyItem, storyletItem } from './walker-note'
 import './people.css'
 
@@ -64,7 +64,7 @@ export function createPeople(corner: HTMLElement, slot: HTMLElement, view: View)
     update() {
       if (!open) return
       const kept = view.kept
-      const key = kept.map((w) => `${w.name}:${doingNow(w)}`).join('|')
+      const key = kept.map((w) => `${w.name}:${view.doingNow(w)}`).join('|')
       if (key !== shown.kept || kept.some((w, i) => w !== listed[i])) {
         listed = kept
         el('.kept').replaceChildren(
@@ -78,7 +78,7 @@ export function createPeople(corner: HTMLElement, slot: HTMLElement, view: View)
                 row.appendChild(document.createElement('b')).textContent = other ? `${walker.name} and ${other.name}` : walker.name
                 const now = row.appendChild(document.createElement('span'))
                 now.className = 'handwritten'
-                now.textContent = doingNow(walker)
+                now.textContent = view.doingNow(walker)
                 return item
               })
             : [emptyItem('Nobody. Follow someone, then Keep them.')]),

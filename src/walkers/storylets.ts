@@ -1,10 +1,11 @@
-import type { Kind, Place } from './walkers'
+import type { Kind, Own, Place } from './walkers'
 
 /**
  * What a beat of a Storylet has its Walker do (#290): stop where they are on their pavement, go to a Place of the kind
- * (in at a door, onto a bench, up to a terrace), or cross the Road at a Signal of their own Tile to the far pavement.
+ * (in at a door, onto a bench, up to a terrace), cross the Road at a Signal of their own Tile to the far pavement, or go
+ * in at their own door (#291).
  */
-export type Step = 'stop' | Place['kind'] | 'cross'
+export type Step = 'stop' | Place['kind'] | 'cross' | 'home'
 
 /** A time of day a Storylet can begin at. */
 export type TimeOfDay = 'morning' | 'day' | 'dusk' | 'night'
@@ -20,6 +21,8 @@ export interface Storylet {
   /** Only for a two, or only for one alone. */
   readonly pair?: boolean
   readonly when?: readonly TimeOfDay[]
+  /** Only for Walkers with a door of their own that is this to them (#291), which a `home` beat goes to. */
+  readonly needs?: Own
   readonly beats: readonly (readonly [Step, string])[]
   readonly end: string
 }
@@ -28,10 +31,10 @@ export interface Storylet {
 export const timeOf = (t: number): TimeOfDay => (t < 0.18 || t > 0.92 ? 'morning' : t < 0.42 ? 'day' : t < 0.6 ? 'dusk' : 'night')
 
 /**
- * Every Storylet: the prototype's that need only shops, benches, windows and a Signal to cross at, two that go up to a
- * terrace (#293), and four of stops alone, two for one alone and two for a two at any time of day, so that a Walker
- * whose pavement reaches no Place has Storylets too, and never only the one they had last. The prototype's that need
- * a door of the Walker's own wait for one (#291). Adding one is adding data here.
+ * Every Storylet: the prototype's, those that need only shops, benches, windows and a Signal to cross at and the four
+ * that need a door of the Walker's own (#291); two that go up to a terrace (#293); and four of stops alone, two for one
+ * alone and two for a two at any time of day, so that a Walker whose pavement reaches no Place has Storylets too, and
+ * never only the one they had last. Adding one is adding data here.
  */
 export const STORYLETS: readonly Storylet[] = [
   {
@@ -169,6 +172,45 @@ export const STORYLETS: readonly Storylet[] = [
       ['door', 'A and B found the shop they were after.'],
     ],
     end: 'A and B came out agreeing it had been worth crossing for.',
+  },
+  {
+    title: 'Forgot something',
+    needs: 'home',
+    pair: false,
+    beats: [
+      ['stop', 'A got to the corner and stopped.'],
+      ['home', 'A went back in for it.'],
+    ],
+    end: 'A set off again, patting a pocket.',
+  },
+  {
+    title: 'Home before dark',
+    needs: 'home',
+    when: ['dusk', 'night'],
+    beats: [
+      ['door', 'A picked something up on the way.'],
+      ['home', 'A let themselves in and put the light on.'],
+    ],
+    end: 'A came back out for a last look at the road.',
+  },
+  {
+    title: 'Minding the shop',
+    needs: 'shop',
+    beats: [
+      ['home', 'A went in to mind the counter.'],
+      ['stop', 'A stepped out to see how the window looked.'],
+    ],
+    end: 'A moved one thing in the window and was satisfied.',
+  },
+  {
+    title: 'The shift',
+    needs: 'plant',
+    beats: [
+      ['home', 'A clocked in.'],
+      ['bench', 'A took the break outside.'],
+      ['home', 'A went back in before the whistle.'],
+    ],
+    end: 'A clocked out and stood a moment in the air.',
   },
   {
     title: 'Up for the view',

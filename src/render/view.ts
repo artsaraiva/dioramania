@@ -120,7 +120,7 @@ export function createView(
   let roads = createRoads(sim.net, sim.spec)
   const signals = createSignals()
   const cars = createCars(sim.net)
-  const walkers = createWalkers(ground.scenery.seed)
+  const walkers = createWalkers(ground.scenery.seed, ground.zoneOf)
   pieces.forEach((piece, i) => walkers.add(sim.net, field, [piece], laid[i].places, laid[i].obstacles))
   const emotion = createJamEmotion()
   const tools = createTools()
@@ -437,6 +437,9 @@ export function createView(
 
     /** The other of `walker`'s two, if they walk in one. */
     otherOfTwo: walkers.otherOfTwo,
+
+    /** What `walker` is doing now, in a few words, as their note says it: whose door it is too (#291). */
+    doingNow: walkers.doingNow,
 
     /**
      * Keep `walker` and the other of their two (#290), so that their Storylets go on while the player looks elsewhere,

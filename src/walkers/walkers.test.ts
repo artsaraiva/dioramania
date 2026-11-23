@@ -78,23 +78,73 @@ const BENCH: Place = { kind: 'bench', x: -20, y: -30, ry: Math.PI }
 const TERRACE: Place = { kind: 'terrace', x: 20, y: -35, ry: Math.PI, up: { x: 20, y: -30, h: 10, ry: Math.PI, sit: false } }
 const POT = box(-0.3, -37, 0.3, -36.4)
 
-/** What each Walker of a City of seed `seed` with the west Tile was doing, and where, every step of ten minutes. */
+/**
+ * What each Walker of a City of seed `seed` with the west Tile, its door a home to whoever has one of their own, was
+ * doing, and where, every step of ten minutes: at their own door, `own`.
+ */
 function seen(seed: number) {
   const walkers = new Walkers(seed)
-  walkers.add(WEST, [pavement(WEST, 12)], [DOOR, BENCH, TERRACE], [POT])
+  walkers.add(WEST, [pavement(WEST, 12)], [DOOR, BENCH, TERRACE], [POT], [], 'home')
+  const where = (w: Walker) => (w.way && w.way.place === w.own?.door ? 'own' : (w.way?.place.kind ?? ''))
   const steps: string[][] = []
   for (let t = 0; t < 600; t += 0.1) {
     walkers.step(0.1)
-    steps.push(walkers.all.map((w) => `${w.doing}:${w.way?.place.kind ?? ''}@${w.s.toFixed(2)}`))
+    steps.push(walkers.all.map((w) => `${w.doing}:${where(w)}@${w.s.toFixed(2)}`))
   }
   return steps
 }
 
-it('what each Walker does comes from the City’s seed', () => {
+/** Doors along each side of `tile`'s pavement 12 m in, 3 m in from it, each facing it: `n` to a side. */
+function doorsOn(tile: Bounds, n = 3): Place[] {
+  const [cx, cy, r] = [(tile.x0 + tile.x1) / 2, (tile.y0 + tile.y1) / 2, (tile.x1 - tile.x0) / 2 - 15]
+  return Array.from({ length: n }, (_, k) => -r + ((k + 0.5) * 2 * r) / n).flatMap((along): Place[] => [
+    { kind: 'door', x: cx + along, y: cy - r, ry: Math.PI },
+    { kind: 'door', x: cx + along, y: cy + r, ry: 0 },
+    { kind: 'door', x: cx - r, y: cy + along, ry: Math.PI / 2 },
+    { kind: 'door', x: cx + r, y: cy + along, ry: -Math.PI / 2 },
+  ])
+}
+
+it('a Walker’s own door comes from the City’s seed, the same each time the City is laid', () => {
+  /** The Walkers of a City of seed 7 whose Tiles, laid in the order given, have doors that are `own` to them. */
+  const laid = (own: 'home' | 'shop' | undefined, ...tiles: Bounds[]) => {
+    const walkers = new Walkers(7)
+    for (const tile of tiles) walkers.add(tile, [pavement(tile, 12), pavement(tile, 40)], doorsOn(tile), [], [], own)
+    return walkers
+  }
+  const homes = laid('home', WEST, EAST)
+  // A home of their own is at a door their pavement reaches: on the pavement 40 m in, which reaches none, nobody has one.
+  const residents = homes.all.filter((w) => w.own)
+  expect(residents.length).toBeGreaterThan(0)
+  for (const w of residents) {
+    expect(w.own!.kind).toBe('home')
+    expect(doorsOn(w.tile)).toContainEqual(w.own!.door)
+    expect(w.line.length).toBeGreaterThan(200)
+  }
+  // The other of a two lives where the lead lives, if anywhere.
+  for (const w of homes.all.filter((w) => w.lead)) expect(w.own === undefined || w.own === w.lead!.own).toBe(true)
+  // Laid in another order, or the Tile laid again as a Swap's Undo lays it, each has the same door.
+  expect(on(laid('home', EAST, WEST), WEST)).toEqual(on(homes, WEST))
+  homes.takeOff([EAST])
+  homes.add(EAST, [pavement(EAST, 12), pavement(EAST, 40)], doorsOn(EAST), [], [], 'home')
+  expect(on(homes, EAST)).toEqual(on(laid('home', WEST, EAST), EAST))
+  // The same doors after a Stage-up, however the build noted them, the same door.
+  const before = structuredClone(on(homes, WEST).map((w) => w.own))
+  homes.refit(WEST, doorsOn(WEST).reverse(), [], 'home')
+  expect(on(homes, WEST).map((w) => w.own)).toEqual(before)
+  // Where a door is a shop, some keep one, and no schoolchild does; and where a door is nobody's own, nobody has one.
+  const keepers = laid('shop', WEST, EAST).all.filter((w) => w.own)
+  expect(keepers.length).toBeGreaterThan(0)
+  expect(keepers.every((w) => w.own!.kind === 'shop' && w.kind !== 'schoolchild')).toBe(true)
+  expect(laid(undefined, WEST, EAST).all.some((w) => w.own)).toBe(false)
+})
+
+it('what each Walker does comes from the City’s seed: going in and out of their own door too', () => {
   const seven = seen(7)
   expect(seen(7)).toEqual(seven)
   expect(seen(8)).not.toEqual(seven)
-  expect(['act:door', 'act:bench', 'up:terrace'].every((act) => seven.flat().some((w) => w.startsWith(act)))).toBe(true)
+  const did = ['act:door', 'act:own', 'back:own', 'act:bench', 'up:terrace']
+  expect(did.every((act) => seven.flat().some((w) => w.startsWith(act)))).toBe(true)
 })
 
 // Crossing at a Signal
@@ -198,11 +248,13 @@ it('a Storylet fits who the Walker is, who they are with, the time of day and th
     only('After school', { kinds: ['schoolchild'] }),
     only('Late', { when: ['night'] }),
     only('Up high', { beats: [['terrace', 'A went up.']] }),
+    only('At home', { needs: 'home', beats: [['home', 'A went in.']] }),
+    only('At the shop', { needs: 'shop' }),
   ]
-  // On the pavement round the Block 12 m in with its Places, or on the one 40 m in, which reaches none: everyone Kept,
-  // a two by keeping the one who walks beside the lead.
+  // On the pavement round the Block 12 m in with its Places, its door a home to whoever has one of their own, or on the
+  // one 40 m in, which reaches none: everyone Kept, a two by keeping the one who walks beside the lead.
   const walkers = new Walkers(7, storylets)
-  walkers.add(WEST, [pavement(WEST, 12), pavement(WEST, 40)], [DOOR, BENCH, TERRACE], [POT])
+  walkers.add(WEST, [pavement(WEST, 12), pavement(WEST, 40)], [DOOR, BENCH, TERRACE], [POT], [], 'home')
   for (const w of walkers.all) if (w.lead || !walkers.otherOfTwo(w)) walkers.keep(w, true)
   const reaches = new Map(walkers.all.map((w) => [w, w.line.length > 200]))
   // The s from each Storylet's end to the next one's beginning, as two always fit.
@@ -235,13 +287,15 @@ it('a Storylet fits who the Walker is, who they are with, the time of day and th
       if (title === 'After school') expect((w.lead ?? w).kind).toBe('schoolchild')
       if (title === 'Late') expect(i).toBeGreaterThanOrEqual(atNoon.get(w)!)
       if (title === 'Up high') expect(reaches.get(w)).toBe(true)
+      if (title === 'At home') expect((w.lead ?? w).own?.door).toBe(DOOR)
       expect(title).not.toBe(w.log[i - 1]?.title)
       // A two's Storylets are both of theirs, and name both.
       const [a, b] = w.lead ? [w.lead.name, w.name] : [w.name, other?.name]
       if (title === 'Together' && ended) expect(lines).toEqual([`${a} and ${b} stopped.`, `${a} walked on.`])
     })
   }
-  expect([...titles].sort()).toEqual(['After school', 'Alone', 'Anyone', 'Late', 'Together', 'Up high'])
+  // Nobody keeps a shop where a door is a home.
+  expect([...titles].sort()).toEqual(['After school', 'Alone', 'Anyone', 'At home', 'Late', 'Together', 'Up high'])
 })
 
 it('a beat’s line reaches the log once it is done: across the Road, never while still waiting to cross', () => {

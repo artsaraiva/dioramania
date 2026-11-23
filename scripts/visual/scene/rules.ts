@@ -535,6 +535,21 @@ const drives: Rule = (r) => {
   return out
 }
 
+/**
+ * Every shed has a door for people, and each opens onto ground a Walker can reach (#291): a Walker's way runs to it from
+ * their Block's pavement, round all that stands, as the game finds the ways.
+ */
+export const shedDoors: Rule = (r) => {
+  const out: Failure[] = []
+  for (const lot of r.lots.filter((l) => l.form === 'shed')) {
+    const doors = r.doors.filter((d) => d.block === lot.block && d.lot === lot.index)
+    const { x0, y0, x1, y1 } = lot.box
+    if (!doors.length) out.push(fail('shed-doors', r, lot, `shed at ${pt({ x: (x0 + x1) / 2, y: (y0 + y1) / 2 })} has no door`, '0 doors'))
+    for (const d of doors) if (!d.reached) out.push(fail('shed-doors', r, d, `no Walker reaches the shed door at ${pt(d.at)}`, '1 door'))
+  }
+  return out
+}
+
 /** Every rule over one report, by name. */
 export function rules(ceilings: Record<string, { triangles: number; meshes: number }>): Record<string, Rule> {
   return {
@@ -551,6 +566,7 @@ export function rules(ceilings: Record<string, { triangles: number; meshes: numb
     pools,
     'block-zoom': blockZoomProps,
     drives,
+    'shed-doors': shedDoors,
     colours,
     budget: budget(ceilings),
   }
