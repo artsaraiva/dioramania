@@ -128,6 +128,10 @@ _Avoid_: Driveway, entrance, access, garage
 A place on a Block, reached through its Drive, where one vehicle can park in view.
 _Avoid_: Parking space, parking spot, car park, slot
 
+**Footpath**:
+The pavement where two Tiles meet, level with the Blocks on both sides, by which Walkers pass from one Tile to the next. Each Tile paves its own half, so an open edge of the City is half a Footpath.
+_Avoid_: Alley, lane, strip, gap
+
 **Arm**:
 One Road's end at a Junction, carrying an Approach and an Exit. A Road between two Junctions is an Arm of both.
 _Avoid_: Leg, branch, side
@@ -180,7 +184,7 @@ _Avoid_: Congestion, traffic, gridlock
 ### People
 
 **Walker**:
-A person of the City, on foot, with a name, a home, something they do and a log of their Storylets: always the same person in the same City, and a driver out of their car is one. On a Tile of homes, shops or plants, many have a door of their own there: their home, a shop they keep or the plant they work at. Walkers stay on the pavements and at the Places off them, and cross a Road only at a Signal of their own Tile, in the Walk phase traffic stops for, to walk the pavement they reach.
+A person of the City, on foot, with a name, a home, something they do and a log of their Storylets: always the same person in the same City, and a driver out of their car is one. On a Tile of homes, shops or plants, many have a door of their own there: their home, a shop they keep or the plant they work at. Walkers stay on the pavements and at the Places off them, and cross a Road only at a Signal, in the Walk phase traffic stops for, to walk the pavement they reach.
 _Avoid_: Pedestrian, person, peg, citizen, character, NPC
 
 **Place**:
@@ -234,7 +238,7 @@ A one-off building or feature that fills a Block, placed by the City's seed and 
 _Avoid_: Scene, monument
 
 **Kerbside**:
-The strip of pavement along a Block's edge and the street furniture standing on it.
+The strip of pavement along a Block's edge on a Road, and the street furniture standing on it.
 _Avoid_: Street, sidewalk, pavement edge
 
 **Skin**:

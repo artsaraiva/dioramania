@@ -308,6 +308,7 @@ Default view looks from the south-east at about 41° tilt with the whole slab in
   A Level's Blocks are cut within its own pieces and keep clear of their outline, so a seam between two Levels' pieces is road plate and no later Reveal changes an earlier Level's Blocks.
   A Level's new Roads stay on its own pieces.
   (Settled with the user after the first Reveal playtest, 2026-11-14.)
+  In the sandbox each Tile is a piece of its own, and the seam between two Tiles stops being road plate: it becomes a Footpath, which each Tile paves half of ([ADR 0012](../../docs/adr/0012-each-tile-paves-its-half-of-a-footpath.md), grilled on [#275](https://github.com/artsaraiva/dioramania/issues/275), built by [#362](https://github.com/artsaraiva/dioramania/issues/362)). No Tile's Blocks change for it.
 - Roads run to the slab edge and stop. Cars grow in at a Gateway and shrink out at one. No tunnels, ramps or bridges off the slab.
 
 ## Roads and Blocks

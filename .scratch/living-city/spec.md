@@ -226,6 +226,19 @@ Parking
 - About two in five cars that come down a lane with a free Stand ahead take it. The car slows, stops beside the Stand, leaves its lane, and is drawn easing onto the Stand. When its driver is back, or after four minutes, it waits for a gap in its lane and joins it again on the route it had.
 - In the prototype this is the same trip, paused. The decision for the game is that a trip ends where the car parks and a new one starts when it leaves, which is the change ADR 0005 names and [#95](https://github.com/artsaraiva/clearway/issues/95) designs. Demand by category (homes sending trips to shops and work, in the manner of Cities: Skylines) hangs off that and is not designed here.
 
+Footpaths
+
+Grilled on [#275](https://github.com/artsaraiva/dioramania/issues/275) (2026-11-23). The decision, and what was turned down, is [ADR 0012](../../docs/adr/0012-each-tile-paves-its-half-of-a-footpath.md). None of it was in the prototype, and none is built yet.
+
+- Each Tile's Blocks stop 2 m short of its edge, so two neighbouring Tiles leave 4 m of bare road plate between their Blocks, kerbed and lamp-lit on both sides. That strip becomes a **Footpath**: pavement level with the Blocks on both sides, with no kerb.
+- Each Tile paves its own 2 m, whether or not a neighbour is there, and no Tile reads its neighbour. Two halves meet when a neighbour lands, and an open edge of the City is pavement to the brim of the plate. A half falls in with its Tile's Blocks during the Assembly, goes and comes back with them through a Swap and an Undo, and stands through a Rezoning.
+- Nothing moves from where it is. The 2 m is added round the Blocks, which keep their outlines, so every building, Lot, lamp and Walker of an existing City stays, and a save loads as before.
+- One rule for every seam, whether a Road crosses it or not, and between green Tiles too. Along a Road the kerb runs unbroken past a Footpath's mouth.
+- No table of Zone pairs. Each Zone dresses its own side: its fronts, a hedge, a fence. Industrial and parks show a Footpath a bare side today ([#363](https://github.com/artsaraiva/dioramania/issues/363)).
+- On a Block's Footpath side the lamps, benches and planters stay, and what belongs to a kerb goes: kerbstones, drain grates and bollards. The pavement is the Blocks' own. Whether the lamps want thinning, or the pavement a paving of its own, is for the eye once it is built ([#364](https://github.com/artsaraiva/dioramania/issues/364)). A green Zone may later lay a surface of its own on its half, level and walkable ([#365](https://github.com/artsaraiva/dioramania/issues/365)).
+- The rules of Finish cover a Block's Footpath side, and the scene check holds three facts there: the pavement reaches the Tile's edge on every side no Road crosses; no kerbstone, drain grate or bollard stands on it; no 12 m of it stands empty ([#362](https://github.com/artsaraiva/dioramania/issues/362), which builds the Footpath).
+- Walking between Tiles ([#294](https://github.com/artsaraiva/dioramania/issues/294)): a Walker steps from one Tile's pavement to the next anywhere along a Footpath, once the neighbour has landed, and crosses a Road at any Signal they reach, not only their own Tile's. The pavements join into islands bounded by Roads, and a Signal is the only way from one island to the next. A Walker on a neighbour's Tile when it is swapped, or taken off by an Undo, is put straight back on their own pavement.
+
 The camera
 
 - Keys move, turn and zoom the camera; a plain drag moves it; a right-drag or Shift-drag orbits. The closest zoom is nearly three times closer than Block zoom. Following a Walker keeps them near the middle of the screen until the player moves the camera or lets go.
@@ -250,6 +263,7 @@ Glossary changes
 
 - **Walker** loses "Decoration only: traffic never meets one." A Walker is someone with a name and a log, and traffic stops for them at a Signal.
 - New: **Storylet** (a short story in beats that happens to a Walker the player watches or keeps), **Place** (somewhere a Walker can go: a door, a bench, a terrace), **Signal** (traffic lights running a Priority junction in phases), **Walk phase** (the phase in which every Arm is red and Walkers cross), **Stand** (a place off the Road where one car can park), **Follow** and **Keep** (what the player does to a Walker). A name is needed for the zoom closer than Block zoom.
+- From the grilling of [#275](https://github.com/artsaraiva/dioramania/issues/275): new, **Footpath** (the pavement where two Tiles meet, which each Tile paves half of). **Walker** loses "of their own Tile": a Walker crosses a Road at any Signal they reach. **Kerbside** is the pavement along a Block's edge on a Road.
 - An ADR is owed for each of: the low-poly look replacing the look of `.scratch/visual-style/spec.md`; Walkers meeting traffic; Signals as a second way to run a Priority junction, and whether the player chooses it with a Tool.
 
 ## Testing Decisions
@@ -257,7 +271,7 @@ Glossary changes
 A good test here asserts an outcome the player could see: a car stopped or went, a Walker crossed or waited, a log holds these lines in this order. It never asserts how the outcome was reached.
 
 - **Simulation outcomes** (the existing seam): with Signals on, a car on a red Arm is stopped at its line and one on a green Arm goes through; in the walk phase no car enters the Junction; a car that takes a Stand leaves its lane and later rejoins it and completes its route; a seed gives the same result every run with Signals and parking on. Prior art: the tests that a City jams as configured and that a seed gives the same result.
-- **Walkers** (a new seam, agreed with the user on 2026-11-20; CLAUDE.md's list of seams is to gain it): the same seed gives the same Walker; a Storylet begins only for a Walker who has been followed long enough or is kept, and only one that fits them; its beats run in order and end in the Walker's log; a Walker starts across a Road only in the walk phase with time enough left; a save loads back the Walkers the player keeps and their logs. Prior art: the Stages tests, which drive game state and read it back.
+- **Walkers** (a new seam, agreed with the user on 2026-11-20; CLAUDE.md's list of seams is to gain it): the same seed gives the same Walker; a Storylet begins only for a Walker who has been followed long enough or is kept, and only one that fits them; its beats run in order and end in the Walker's log; a Walker starts across a Road only in the walk phase with time enough left; a save loads back the Walkers the player keeps and their logs. Walking between Tiles ([#294](https://github.com/artsaraiva/dioramania/issues/294)) adds three, agreed with the user on 2026-11-23: a Walker bound for a Place on the next Tile reaches it and comes back to their own door; one on a neighbour's Tile when it is swapped or taken off is on their own pavement afterwards; one crosses at the Signal of a Tile that is not theirs, and only in the Walk phase. Prior art: the Stages tests, which drive game state and read it back.
 - Everything else (the look, the blend, the figures' motion, the lights' lamps, the camera, the page) is verified by running the game, as CLAUDE.md has it for `src/render` and `src/ui`. The scene check and the frame-time bench apply to the look.
 
 ## Out of Scope
@@ -322,7 +336,7 @@ A one-page style guide for the target look (palettes per Zone, short rules a bui
 - [#272](https://github.com/artsaraiva/dioramania/issues/272) Record the look and the Walker in the glossary and ADRs
 - [#273](https://github.com/artsaraiva/dioramania/issues/273) Remove the planes
 - [#274](https://github.com/artsaraiva/dioramania/issues/274) Grill: how each Zone works into the City
-- [#275](https://github.com/artsaraiva/dioramania/issues/275) Grill: the seams between Tiles
+- [#275](https://github.com/artsaraiva/dioramania/issues/275) Grill: the seams between Tiles, grilled 2026-11-23 ([ADR 0012](../../docs/adr/0012-each-tile-paves-its-half-of-a-footpath.md))
 - [#276](https://github.com/artsaraiva/dioramania/issues/276) Low-poly shading and shapes behind a dev switch, blocked by [#271](https://github.com/artsaraiva/dioramania/issues/271)
 - [#277](https://github.com/artsaraiva/dioramania/issues/277) Windows, sills, shutters and doors as objects, blocked by [#276](https://github.com/artsaraiva/dioramania/issues/276)
 - [#278](https://github.com/artsaraiva/dioramania/issues/278) Flower boxes and pots, blocked by [#277](https://github.com/artsaraiva/dioramania/issues/277)
@@ -342,11 +356,15 @@ A one-page style guide for the target look (palettes per Zone, short rules a bui
 - [#291](https://github.com/artsaraiva/dioramania/issues/291) A door of their own, blocked by [#290](https://github.com/artsaraiva/dioramania/issues/290)
 - [#292](https://github.com/artsaraiva/dioramania/issues/292) Keep Walkers across a save, blocked by [#290](https://github.com/artsaraiva/dioramania/issues/290)
 - [#293](https://github.com/artsaraiva/dioramania/issues/293) Terraces and balconies, blocked by [#288](https://github.com/artsaraiva/dioramania/issues/288)
-- [#294](https://github.com/artsaraiva/dioramania/issues/294) Walking between Tiles, blocked by [#288](https://github.com/artsaraiva/dioramania/issues/288), [#275](https://github.com/artsaraiva/dioramania/issues/275)
+- [#294](https://github.com/artsaraiva/dioramania/issues/294) Walking between Tiles, blocked by [#288](https://github.com/artsaraiva/dioramania/issues/288), [#362](https://github.com/artsaraiva/dioramania/issues/362)
 - [#295](https://github.com/artsaraiva/dioramania/issues/295) Signals at Priority junctions, blocked by [#272](https://github.com/artsaraiva/dioramania/issues/272)
 - [#296](https://github.com/artsaraiva/dioramania/issues/296) Walkers cross on the walk phase, blocked by [#288](https://github.com/artsaraiva/dioramania/issues/288), [#295](https://github.com/artsaraiva/dioramania/issues/295)
 - [#297](https://github.com/artsaraiva/dioramania/issues/297) Stands and cars that park, blocked by [#272](https://github.com/artsaraiva/dioramania/issues/272)
 - [#298](https://github.com/artsaraiva/dioramania/issues/298) Drivers, blocked by [#290](https://github.com/artsaraiva/dioramania/issues/290), [#297](https://github.com/artsaraiva/dioramania/issues/297)
 - [#299](https://github.com/artsaraiva/dioramania/issues/299) A shop's own truck, blocked by [#298](https://github.com/artsaraiva/dioramania/issues/298)
+- [#362](https://github.com/artsaraiva/dioramania/issues/362) Footpaths between Tiles, from [#275](https://github.com/artsaraiva/dioramania/issues/275)
+- [#363](https://github.com/artsaraiva/dioramania/issues/363) Each Zone's side of a Footpath, blocked by [#362](https://github.com/artsaraiva/dioramania/issues/362)
+- [#364](https://github.com/artsaraiva/dioramania/issues/364) Look over the built Footpaths, blocked by [#362](https://github.com/artsaraiva/dioramania/issues/362)
+- [#365](https://github.com/artsaraiva/dioramania/issues/365) Green Tiles surface their own half of a Footpath, blocked by [#362](https://github.com/artsaraiva/dioramania/issues/362), [#364](https://github.com/artsaraiva/dioramania/issues/364)
 
 Left to open Grills, with a comment on each pointing here: whether the player chooses Signals with a Tool ([#55](https://github.com/artsaraiva/dioramania/issues/55)); trips that end where a car parks, and Demand by category ([#95](https://github.com/artsaraiva/dioramania/issues/95)); Walkers crossing at a Ring ([#35](https://github.com/artsaraiva/dioramania/issues/35)).
