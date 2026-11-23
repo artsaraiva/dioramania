@@ -1,12 +1,14 @@
 import { City, LAYOUTS, ZONES, type Cell, type Layout, type Zone } from '../city/city'
 import type { Change } from '../sim/spec'
+import type { KeptWalker } from '../walkers/walkers'
 import { Game, LAST_STAGE, newSeed, type Stage } from './game'
 
 // The autosave (.scratch/ui-ux/spec.md, "Save"): one save in localStorage for a normal run and one for a Free run. The
 // page opens on the title screen (#243, "Title screen"), which sums up the saved run of the kind last played from its
 // text alone, and the run is built as the player leaves the title. A save holds what it takes to build the City and
-// its Junctions again, with each Tile's Stage, the yen and the Record. Vehicles and the Undo window are not saved, so
-// a run that loads starts from the City and a Pre-warm. There is no migration: a save that will not load gives way to a new run, which
+// its Junctions again, with each Tile's Stage, the yen, the Record, and the Walkers the player Keeps with their logs
+// (#292). Vehicles, the other Walkers' logs, the Storylets that ended lately and the Undo window are not saved, so a run
+// that loads starts from the City and a Pre-warm. There is no migration: a save that will not load gives way to a new run, which
 // keeps the save's Record if that can be read and the save is of this version. Saves kept under the keys of the game's
 // old name are carried over to the new keys as they are.
 
@@ -57,15 +59,35 @@ interface Save {
   stageInspector?: boolean
   /** Missing from a save written before City notes, which then opens closed: no reason to raise the version either. */
   cityNotes?: boolean
+  /**
+   * The Walkers the player Keeps, with their logs (#292). Missing from a save written before, which then Keeps nobody:
+   * no reason to raise the version either.
+   */
+  kept?: KeptWalker[]
 }
 
 const isAmount = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
 const isInteger = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n)
 /** A Record a save can hold: a Growth, which is a whole number. */
 const isRecord = (n: unknown): n is number => isInteger(n) && n >= 0
+/** A Walker Kept as a save can hold them: a seed, a name, and a log of Storylets, each a title, its lines and whether it ended. */
+const isKept = (w: KeptWalker) =>
+  isInteger(w?.seed) &&
+  typeof w.name === 'string' &&
+  Array.isArray(w.log) &&
+  w.log.every(
+    (entry) =>
+      typeof entry?.title === 'string' &&
+      typeof entry.ended === 'boolean' &&
+      Array.isArray(entry.lines) &&
+      entry.lines.every((line: unknown) => typeof line === 'string'),
+  )
 
-/** The save of `game`, with what `screen` keeps of the screen, as the text localStorage holds. */
-export function saveOf(game: Game, screen: Screen = FIRST_SCREEN): string {
+/**
+ * The save of `game`, with what `screen` keeps of the screen and the Walkers the player Keeps, `kept`, as the text
+ * localStorage holds.
+ */
+export function saveOf(game: Game, screen: Screen = FIRST_SCREEN, kept: readonly KeptWalker[] = []): string {
   const save: Save = {
     version: VERSION,
     seed: game.seed,
@@ -78,28 +100,32 @@ export function saveOf(game: Game, screen: Screen = FIRST_SCREEN): string {
     record: game.record,
     stageInspector: screen.stageInspector,
     cityNotes: screen.cityNotes,
+    kept: [...kept],
   }
   return JSON.stringify(save)
 }
 
 /**
- * The run saved as `text`, of the kind `free` says, with what it keeps of the screen, or a new run when there is no
- * save. A save from an older version, or a damaged one, gives way to a new run, and `notice` says so in one line. The
- * new run keeps a damaged save's Record if that can be read, but not an older one's, which may count something else.
- * The Sim starts at its Pre-warm: `step` until `sim.prewarmed`.
+ * The run saved as `text`, of the kind `free` says, with what it keeps of the screen and the Walkers the player Keeps,
+ * or a new run when there is no save. A save from an older version, or a damaged one, gives way to a new run, and
+ * `notice` says so in one line. The new run keeps a damaged save's Record if that can be read, but not an older one's,
+ * which may count something else. The Sim starts at its Pre-warm: `step` until `sim.prewarmed`.
  */
-export function load(text: string | null, free: boolean): { game: Game; notice: string | null; screen: Screen } {
+export function load(
+  text: string | null,
+  free: boolean,
+): { game: Game; notice: string | null; screen: Screen; kept: readonly KeptWalker[] } {
   const screen = { ...FIRST_SCREEN }
-  if (text === null) return { game: new Game(undefined, { free }), notice: null, screen }
+  if (text === null) return { game: new Game(undefined, { free }), notice: null, screen, kept: [] }
   let data: unknown
   try {
     data = JSON.parse(text)
     const game = restore(data as Save, free)
-    const { stageInspector, cityNotes } = data as Save
-    return { game, notice: null, screen: { stageInspector: stageInspector === true, cityNotes: cityNotes === true } }
+    const { stageInspector, cityNotes, kept = [] } = data as Save
+    return { game, notice: null, screen: { stageInspector: stageInspector === true, cityNotes: cityNotes === true }, kept }
   } catch {
     const { notice, record } = refused(data)
-    return { game: new Game(undefined, { free, record }), notice, screen }
+    return { game: new Game(undefined, { free, record }), notice, screen, kept: [] }
   }
 }
 
@@ -179,6 +205,8 @@ function check(save: Save) {
     throw new Error('a Priority rule that is not main, yield or stop')
   if (save.changes.some(({ signal }) => signal !== undefined && typeof signal !== 'boolean'))
     throw new Error('a Signal that is neither on nor off')
+  if (save.kept !== undefined && !(Array.isArray(save.kept) && save.kept.every(isKept)))
+    throw new Error('a Walker Kept who is nobody, or a log that is none')
   // Before Signals (#295) every Arm started as `yield`, and a save kept that. Arms that all yield give way as Arms
   // with no sign do, so they load as those, and the Junction shows no sign the player never put there.
   // A save written since says of each such Junction whether it has a Signal, and keeps the yield signs the player set.
@@ -197,6 +225,13 @@ export interface Run {
   readonly notice: string | null
   /** What the save keeps of the screen, for the screen to change. */
   readonly screen: Screen
+  /** The Walkers the player Keeps, as the save held them (#292), for the view to keep again once it lays them. */
+  readonly kept: readonly KeptWalker[]
+  /**
+   * Have every save from now on hold the Walkers the player Keeps as `kept` gives them: the view's, once it is built.
+   * Until then a save holds those it loaded.
+   */
+  saveWalkersFrom(kept: () => readonly KeptWalker[]): void
   /** A new run of the same kind, with a new seed, in place of this one. */
   newRun(): void
   /** The other kind of run, as it was saved: the Free run from a normal run, or back. */
@@ -260,12 +295,14 @@ export function openRun(params: URLSearchParams): Run | Title {
 function begin(params: URLSearchParams, { free, fresh, told = false }: { free: boolean; fresh?: Game; told?: boolean }): Run {
   write(KEY.playing, free ? 'free' : 'normal')
   const key = free ? KEY.freeRun : KEY.run
-  const loaded = fresh ? { game: fresh, notice: null, screen: { ...FIRST_SCREEN } } : load(read(key), free)
+  const loaded = fresh ? { game: fresh, notice: null, screen: { ...FIRST_SCREEN }, kept: [] } : load(read(key), free)
   const { game, screen } = loaded
+  /** The Walkers the player Keeps now. */
+  let walkersKept = () => loaded.kept
   /** Whether the page is loading again on another run, which this one must not be saved over. */
   let leaving = false
   const keep = () => {
-    if (!leaving) write(key, saveOf(game, screen))
+    if (!leaving) write(key, saveOf(game, screen, walkersKept()))
   }
   game.onUnsaved = keep
   setInterval(keep, EVERY * 1000)
@@ -279,6 +316,10 @@ function begin(params: URLSearchParams, { free, fresh, told = false }: { free: b
     game,
     notice: told ? null : loaded.notice,
     screen,
+    kept: loaded.kept,
+    saveWalkersFrom(kept) {
+      walkersKept = kept
+    },
     newRun() {
       leaving = true
       write(key, saveOf(new Game(undefined, { free, record: game.record })))
@@ -338,6 +379,8 @@ function seeded(seed: number, params: URLSearchParams): Run {
     game: new Game(seed, { free }),
     notice: null,
     screen: { ...FIRST_SCREEN },
+    kept: [],
+    saveWalkersFrom() {},
     newRun: () => go(params, (p) => p.set('seed', String(newSeed()))),
     switchRun: () => go(params, (p) => (free ? p.delete('free') : p.set('free', ''))),
     title: () => go(params, (p) => p.delete('seed')),

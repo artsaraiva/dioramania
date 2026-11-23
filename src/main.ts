@@ -43,6 +43,7 @@ function play(run: Run) {
       scenery: { theme: 'city', seed: game.seed, landmarks: [], blocks: [], streets: {}, avenues: [], seeded: SEEDED },
       zoneOf: (cell) => game.city.tileAt(cell)?.zone,
       stageOf: (cell) => game.stageOf(cell)?.stage ?? 1,
+      kept: run.kept,
     },
     {
       finishing:
@@ -51,6 +52,7 @@ function play(run: Run) {
           : undefined,
     },
   )
+  run.saveWalkersFrom(() => view.saved)
   // Dev only: `?t=0.75` stops the day at that time (0 morning, 0.25 noon, 0.5 dusk, 0.75 night).
   if (import.meta.env.DEV && params.has('t')) view.holdDay(Number(params.get('t')))
   const ui = createUI(document.querySelector<HTMLElement>('#ui')!, canvas, game, view, run)

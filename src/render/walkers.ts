@@ -4,7 +4,17 @@ import { middle, pointAt, type Bounds, type Vec } from '../sim/geometry'
 import type { Network } from '../sim/network'
 import { takesSignal } from '../sim/signals'
 import { cellAt } from '../sim/tiles'
-import { whereIs, Walkers, type Kind, type LeftToCross, type Own, type Place, type Walker, type Zebra } from '../walkers/walkers'
+import {
+  whereIs,
+  Walkers,
+  type Kind,
+  type KeptWalker,
+  type LeftToCross,
+  type Own,
+  type Place,
+  type Walker,
+  type Zebra,
+} from '../walkers/walkers'
 import { KERB } from './blocks'
 import { inside, type Field } from './field'
 import { LOW_POLY } from './look'
@@ -336,6 +346,14 @@ export function createWalkers(seed: number, zoneOf: (cell: Cell) => Zone | undef
     get kept() {
       return walkers.kept
     },
+
+    /** The Walkers the player Keeps, as a save holds them (see `Walkers.saved`). */
+    get saved() {
+      return walkers.saved
+    },
+
+    /** Keep again the Walkers a save held, `kept`, with their logs (see `Walkers.restore`). */
+    restore: (kept: readonly KeptWalker[]) => walkers.restore(kept),
 
     /** The Storylets that ended lately, newest first. */
     get ended() {
