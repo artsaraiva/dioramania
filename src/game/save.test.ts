@@ -1,5 +1,7 @@
 import { expect, it } from 'vitest'
 import { City, FIRST_ZONE, LAYOUTS, ZONES, type Layout, type Zone } from '../city/city'
+import { cellBounds } from '../sim/tiles'
+import { Walkers, type Walker } from '../walkers/walkers'
 import { Game } from './game'
 import { load, saveOf } from './save'
 
@@ -163,13 +165,127 @@ it('starts a new run when a save will not load, which keeps the Record of a save
     ],
     ['a Connection the City lacks', JSON.stringify({ ...save, changes: [{ at: 'c0_0', enable: ['h9_9.in0>h0_0.out0'] }] }), 41],
     ['no yen', JSON.stringify({ ...save, yen: 'lots' }), 41],
+    ['Walkers Kept that are no list', JSON.stringify({ ...save, kept: { seed: 1 } }), 41],
+    ['a Walker Kept with no log', JSON.stringify({ ...save, kept: [{ seed: 1, name: 'Kenji', log: 'lots' }] }), 41],
+    ['a Walker Kept with no seed', JSON.stringify({ ...save, kept: [{ seed: 1.5, name: 'Kenji', log: [] }] }), 41],
+    [
+      'a line of a log that is no line',
+      JSON.stringify({ ...save, kept: [{ seed: 1, name: 'Kenji', log: [{ title: 'An errand', lines: [3], ended: true }] }] }),
+      41,
+    ],
   ]
   for (const [what, text, record] of broken) {
-    const { game, notice } = load(text, false)
+    const { game, notice, kept } = load(text, false)
     expect(notice, what).not.toBeNull()
+    expect(kept, what).toEqual([])
     expect(game.city.tiles, what).toHaveLength(1)
     expect(game.city.tiles[0].zone, what).toBe(FIRST_ZONE)
     expect(game.yen, what).toBe(game.price)
     expect(game.record, what).toBe(record)
   }
+})
+
+// Walkers: a save
+
+/**
+ * The Walkers of `game`'s City, as the view lays them: on each Tile, the pavement round a square Block 12 m in from
+ * its edges, with no Places. The Walkers a save held are kept again from `kept`.
+ */
+function walkersOf(game: Game, kept: Parameters<Walkers['restore']>[0] = []) {
+  const walkers = new Walkers(game.seed)
+  for (const { cell } of game.city.tiles) {
+    const { x0, y0, x1, y1 } = cellBounds(cell)
+    const [a, b, c, d] = [x0 + 12, y0 + 12, x1 - 12, y1 - 12]
+    walkers.add(cellBounds(cell), [
+      [
+        { x: a, y: b },
+        { x: c, y: b },
+        { x: c, y: d },
+        { x: a, y: d },
+      ],
+    ])
+  }
+  walkers.restore(kept)
+  return walkers
+}
+/** `w`'s log, by Storylet: its title, whether it ended, then each line it holds. */
+const said = (w: Walker) => w.log.map((entry) => [entry.title, entry.ended, ...entry.lines])
+
+it('loads back the Walkers the player Keeps, a two together, with their logs, and nobody else’s log', () => {
+  const game = played(false)
+  const walkers = walkersOf(game)
+  const other = walkers.all.find((w) => w.lead)!
+  const [alone, followed] = walkers.all.filter((w) => !w.side)
+  // Keeping the other of a two keeps the two.
+  walkers.keep(other, true)
+  walkers.keep(alone, true)
+  walkers.followed = followed
+  const kept = [alone, other.lead!]
+  // Until each of the three has ended a Storylet, and the two Kept are between Storylets.
+  for (
+    let t = 0;
+    !([alone, other, followed].every((w) => w.log.some((e) => e.ended)) && kept.every((w) => w.log.at(-1)!.ended));
+    t += 0.1
+  ) {
+    expect(t, 'Storylets end').toBeLessThan(1800)
+    walkers.step(0.1)
+  }
+  const { game: back, kept: saved } = load(saveOf(game, undefined, walkers.saved), false)
+  const again = walkersOf(back, saved)
+  expect(again.kept.map((w) => w.seed)).toEqual(kept.map((w) => w.seed))
+  expect(again.kept.map((w) => w.name)).toEqual(kept.map((w) => w.name))
+  expect(again.kept.map(said)).toEqual(kept.map(said))
+  // The other of the two is Kept beside the lead, in the log they share.
+  const otherAgain = again.otherOfTwo(again.kept[1])!
+  expect(otherAgain.seed).toBe(other.seed)
+  expect(otherAgain.kept).toBe(true)
+  expect(said(otherAgain)).toEqual(said(other))
+  // Followed but never Kept, their log is not saved: nobody else in the City has one, nor is Kept.
+  expect(said(followed).length).toBeGreaterThan(0)
+  const seeds = new Set(kept.map((w) => w.seed))
+  for (const w of again.all.filter((w) => !seeds.has((w.lead ?? w).seed))) {
+    expect(w.kept).toBe(false)
+    expect(w.log).toEqual([])
+  }
+  // Their next Storylet begins no sooner than thirty seconds after the last, which ended before the save.
+  for (let t = 0; t < 29.9; t += 0.1) again.step(0.1)
+  expect(again.kept.map(said)).toEqual(kept.map(said))
+})
+
+it('loads a save from before Walkers were Kept as the same run, with nobody Kept', () => {
+  const game = played(false)
+  const save = JSON.parse(saveOf(game))
+  delete save.kept
+  const { game: back, notice, kept } = load(JSON.stringify(save), false)
+  expect(notice).toBeNull()
+  expect(back.city.tiles).toEqual(game.city.tiles)
+  expect(back.record).toBe(41)
+  expect(walkersOf(back, kept).kept).toEqual([])
+})
+
+it('saves a Storylet still running as one broken off: the lines done so far, and with none, nothing', () => {
+  const game = played(false)
+  const walkers = walkersOf(game)
+  const [alone] = walkers.all.filter((w) => !w.side)
+  walkers.keep(alone, true)
+  /** `alone`'s log as a save of the run now loads it back. */
+  const loaded = () => {
+    const { game: back, kept } = load(saveOf(game, undefined, walkers.saved), false)
+    return said(walkersOf(back, kept).kept[0])
+  }
+  const step = (until: () => boolean) => {
+    for (let t = 0; !until(); t += 0.1) {
+      expect(t, 'a Storylet begins and goes on').toBeLessThan(600)
+      walkers.step(0.1)
+    }
+  }
+  const running = () => (alone.storylet ? alone.log.at(-1)!.lines.length : undefined)
+  // Their second Storylet just begun, with no line yet.
+  step(() => alone.log.length === 2 && running() === 0)
+  expect(alone.log[0].ended).toBe(true)
+  expect(loaded()).toEqual(said(alone).slice(0, 1))
+  // Its first beat done.
+  step(() => running() === 1)
+  expect(alone.log[1].ended).toBe(false)
+  expect(loaded()).toEqual(said(alone))
 })

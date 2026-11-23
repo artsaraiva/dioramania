@@ -158,6 +158,16 @@ interface LogEntry {
   ended: boolean
 }
 
+/**
+ * A Walker the player Keeps, as a save holds them (#292): who they are, by their seed and their name, and their log. In
+ * a two, the lead, and the log the two share.
+ */
+export interface KeptWalker {
+  readonly seed: number
+  readonly name: string
+  readonly log: readonly LogEntry[]
+}
+
 /** A Storylet that has ended (#290), as the City's list of them has it: who it happened to, its title and its lines. */
 export interface Ended {
   readonly who: string
@@ -525,6 +535,34 @@ export class Walkers {
   /** Keep `w` (#290), so that their Storylets go on while the player looks elsewhere, or let them go: a two together. */
   keep(w: Walker, kept: boolean) {
     for (const one of [w, this.otherOfTwo(w)]) if (one) one.kept = kept
+  }
+
+  /**
+   * The Walkers the player Keeps, as a save holds them (#292). A save keeps no Storylet running: one still running is
+   * saved as if broken off, the lines done so far in their log, and one with none leaves nothing.
+   * ponytail: every log is saved whole, as the Walker's note shows it, and a Kept Walker's grows by about 6,500
+   * characters an hour of play (34 Storylets, on a Block with doors and a bench). localStorage holds about five million
+   * for both runs, so ten Walkers Kept for some 75 hours fill it, and from then on the run is not saved at all (`write`
+   * gives up quietly). Save only each log's newest Storylets if runs grow so long.
+   */
+  get saved(): KeptWalker[] {
+    return this.kept.map((w) => ({ seed: w.seed, name: w.name, log: structuredClone(w.log.filter((entry) => entry.lines.length)) }))
+  }
+
+  /**
+   * Keep again the Walkers `kept`, as a save held them, with their logs: those the City has, by their seed and name, so
+   * that a log never comes back under another name. One the City no longer has, or whose seed now draws another name, is
+   * let go. One with a Storylet in their log rests before the next, as after any Storylet.
+   */
+  restore(kept: readonly KeptWalker[]) {
+    for (const { seed, name, log } of kept) {
+      const w = this.walkers.find((w) => w.seed === seed && w.name === name)
+      if (!w) continue
+      this.keep(w, true)
+      // A two's log is one the two share.
+      w.log.splice(0, w.log.length, ...log.map((entry) => structuredClone(entry)))
+      if (log.length) rests(w)
+    }
   }
 
   /**

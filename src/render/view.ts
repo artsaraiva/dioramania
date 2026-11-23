@@ -5,7 +5,7 @@ import { extent, sameBounds, type Bounds, type Vec } from '../sim/geometry'
 import type { Junction } from '../sim/network'
 import { leftToCross } from '../sim/signals'
 import type { Sim, Vehicle } from '../sim/sim'
-import { whereIs, type Walker } from '../walkers/walkers'
+import { whereIs, type KeptWalker, type Walker } from '../walkers/walkers'
 import { createCamera, type ScreenPoint } from './camera'
 import { carCentre, createCars } from './cars'
 import { createBlend } from './blend'
@@ -45,6 +45,8 @@ export interface Ground {
   zoneOf(cell: Cell): Zone | undefined
   /** The Stage of the Tile on `cell`, as the game has it when its piece is built. Any, for an unzoned Tile. */
   stageOf(cell: Cell): Stage
+  /** The Walkers a saved run Keeps, with their logs (#292), kept again once the slab's Walkers are laid. */
+  kept?: readonly KeptWalker[]
 }
 
 /** A Tile's piece to build again because the Tile went from one Stage to another, with its build once begun and done. */
@@ -122,6 +124,7 @@ export function createView(
   const cars = createCars(sim.net)
   const walkers = createWalkers(ground.scenery.seed, ground.zoneOf)
   pieces.forEach((piece, i) => walkers.add(sim.net, field, [piece], laid[i].places, laid[i].obstacles))
+  walkers.restore(ground.kept ?? [])
   const emotion = createJamEmotion()
   const tools = createTools()
   const route = createRouteInspector()
@@ -450,6 +453,11 @@ export function createView(
     /** The Walkers the player Keeps, a two by its lead. */
     get kept() {
       return walkers.kept
+    },
+
+    /** The Walkers the player Keeps, with their logs, as a save holds them (#292). */
+    get saved() {
+      return walkers.saved
     },
 
     /** The Storylets that ended lately, newest first: they outlast the Walkers they happened to. */
