@@ -567,6 +567,8 @@ const FACES: [number, number, number[][]][] = [
   [2, 1, [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]]],
   [2, -1, [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]]],
 ]
+/** How many vertices `boxFaces` lays for a box, all its faces but one in two triangles: each part's triangles are runs of it, a box a run. */
+export const BOX_VERTICES = (FACES.length - 1) * 6
 
 /**
  * Push the faces of the box `lo` to `hi` onto `to` as triangles, wound to face out, all but the one facing `back` (an

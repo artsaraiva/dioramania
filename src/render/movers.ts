@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { mulberry32 } from '../sim/demand'
 import type { Polyline } from '../sim/geometry'
 import { DAY } from '../sim/sim'
-import { WIND, WORK, type Glow } from './day'
+import { FULL, WIND, WORK, type Glow } from './day'
 import { spot, type Fate } from './kit'
 import { LOW_POLY } from './look'
 import type { Build } from './scenery'
@@ -126,8 +126,8 @@ export interface Beacon {
 
 /**
  * A pool of light on the ground (#174): a warm decal `w` by `d` centred on `at`, in Three coordinates, turned `ry` as the
- * kit turns a shape, in `colour` at the strength of its light, riding the brick at `brick` of what lights it, and lit as
- * the lamps are. No light source: it adds its glow to the ground under it.
+ * kit turns a shape, in `colour` at the strength of its light, riding the brick at `brick` of what lights it, and lit
+ * once the dusk passes `wake`, its light's point in it (#284). No light source: it adds its glow to the ground under it.
  */
 export interface Pool {
   at: THREE.Vector3
@@ -135,6 +135,7 @@ export interface Pool {
   d: number
   ry: number
   colour: THREE.Color
+  wake: number
   brick: number
 }
 
@@ -312,15 +313,13 @@ const SWAYS: Record<SwayKind, { swing: number; rate: number; model: () => THREE.
 // Each is hung out over the first share of the working day (of the day's clock) and taken in over its last, at its own
 // moment, and takes this share of the day to come or go.
 const HANG = { out: 0.05, in: 0.06, takes: 0.004 }
-// Pools of light (#174): how much of its colour a pool adds at its middle for the lamps' glow; how much of the moonlight
-// on the ground it takes the place of there, without which a warm light added to the bright blue night comes out
-// white, once the lamps glow `full`, as from dusk through the night; and how it fades out to its edge (the share of
-// both at each share of the way out). Below `full`, as the lamps come on before dusk and go out at dawn, it dims as
-// much less as it lights less, so that a pool never darkens the ground.
+// Pools of light (#174): how much of its colour a lit pool adds at its middle for each of a lit lamp's strength
+// (`FULL.lamps`); how much of the moonlight on the ground it takes the place of there, without which a warm light added
+// to the bright blue night comes out white; and how it fades out to its edge (the share of both at each share of the
+// way out). Each comes on whole with its light (#284).
 const POOLS = {
   bright: 0.26,
   dims: 0.6,
-  full: 4,
   fade: [
     [0, 1],
     [0.4, 0.82],
@@ -1104,9 +1103,10 @@ export function createMovers() {
   hanging.onBeforeCompile = takesPaint
   const swaying = new Map<SwayKind, THREE.InstancedMesh>()
   // Pools of light (#174): one instanced mesh of warm decals for the whole City, added to what lies under them, unlit
-  // and untouched by tone mapping, as the contact shadows are, dimming the moonlight under them by up to `POOLS.dims`
-  // (its opacity) as they add their own (its colour, premultiplied by it). Each takes its colour; the material's is the
-  // lamps' glow.
+  // and untouched by tone mapping, as the contact shadows are, dimming the moonlight under them by `POOLS.dims` (its
+  // opacity) as they add their own (its colour, premultiplied by it). Each takes its colour, and its light's point in
+  // the dusk (`wake`), shrinking to nothing until the dusk passes it (#284).
+  const dusk = { value: 0 }
   const warmth = new THREE.MeshBasicMaterial({
     map: canvasTexture(64, 64, (g) => {
       const fade = g.createRadialGradient(32, 32, 0, 32, 32, 32)
@@ -1125,6 +1125,13 @@ export function createMovers() {
     polygonOffset: true,
     polygonOffsetFactor: -2,
   })
+  warmth.color.setScalar((FULL.lamps * POOLS.bright) / POOLS.dims)
+  warmth.onBeforeCompile = (shader) => {
+    shader.uniforms.dusk = dusk
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float wake;\nuniform float dusk;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n\ttransformed *= step(wake, dusk);')
+  }
   const decal = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
   let pooled: THREE.InstancedMesh | null = null
   /** Lay entry `e`'s pools in the mesh of them, each as big as its light's brick stands: none while it falls in. */
@@ -1150,6 +1157,7 @@ export function createMovers() {
       mesh.dispose()
     }
     beacons?.geometry.dispose() // its own copy of the bulb, carrying its flashes
+    pooled?.geometry.dispose() // its own copy of the decal, carrying its pools' points in the dusk
     meshes.clear()
     if (strung) {
       group.remove(strung)
@@ -1192,7 +1200,8 @@ export function createMovers() {
     pooled = null
     const lying = entries.reduce((n, e) => n + e.pools.length, 0)
     if (lying) {
-      pooled = new THREE.InstancedMesh(decal, warmth, lying)
+      const wakes = new Float32Array(entries.flatMap((e) => e.pools.map((p) => p.wake)))
+      pooled = new THREE.InstancedMesh(decal.clone().setAttribute('wake', new THREE.InstancedBufferAttribute(wakes, 1)), warmth, lying)
       pooled.name = 'pools'
       pooled.frustumCulled = false
       pooled.renderOrder = 2 // over the contact shadows, which it lights too
@@ -1591,13 +1600,11 @@ export function createMovers() {
       }
       for (const mesh of swaying.values()) mesh.instanceMatrix.needsUpdate = true
 
-      // Pools of light: lit as the lamps are, dimming the moonlight as much, and hidden by day. Only those whose lights
-      // still arrive move.
-      const lamps = glow?.lamps ?? 0
-      warmth.opacity = POOLS.dims * Math.min(1, lamps / POOLS.full)
-      warmth.color.setScalar(warmth.opacity > 0 ? (lamps * POOLS.bright) / warmth.opacity : 0)
+      // Pools of light: each lit with its light, as far as the dusk has come, and all hidden by day. Only those whose
+      // lights still arrive move.
+      dusk.value = glow?.dusk ?? 0
       if (pooled) {
-        pooled.visible = warmth.opacity > 0
+        pooled.visible = dusk.value > 0
         for (const e of entries) if (e.playing) layPools(e)
       }
     },

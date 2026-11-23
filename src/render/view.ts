@@ -708,7 +708,7 @@ export function createView(
       rig.update(real)
       under.update(dt)
       sky.update(dt, rig.camera.zoom, calm)
-      if (blend) blend.render(day.sky, glow.lamps)
+      if (blend) blend.render(day.sky, glow.dusk)
       else renderer.render(scene, rig.camera)
       labels.update(width, height)
     },

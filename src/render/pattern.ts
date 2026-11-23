@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { KERB, PAVEMENT } from './blocks'
+import { FULL, WAKE } from './day'
 
 /**
  * Surface pattern (#174): siding, windows, tile rows and paving joints drawn on canvas and laid over the scenery's shared
@@ -767,9 +768,9 @@ const f = (n: number) => n.toFixed(4)
 export function createPatterns() {
   const uniforms = {
     patternMap: { value: createPatternMap() },
-    patternLight: { value: new THREE.Color(0, 0, 0) },
+    patternLight: { value: new THREE.Color(WINDOW_LIGHT).multiplyScalar(FULL.windows) },
+    patternDusk: { value: 0 },
   }
-  const warm = new THREE.Color(WINDOW_LIGHT)
   return {
     patch(shader: THREE.WebGLProgramParametersWithUniforms) {
       Object.assign(shader.uniforms, uniforms)
@@ -797,6 +798,7 @@ export function createPatterns() {
           `#include <common>
 uniform highp sampler2DArray patternMap;
 uniform vec3 patternLight;
+uniform float patternDusk;
 // Smooth, not flat: every vertex of a triangle carries the same pattern, and a flat varying makes ANGLE on Metal
 // rework every draw for GL's provoking vertex, 0.4 ms a frame on the 26-Tile City.
 varying vec3 vPattern;
@@ -878,6 +880,8 @@ if (patternKind > 0.5) {
     float dim = min(1.0, pow(patternPaint.g / ${f(new THREE.Color(CURTAIN.glass).g)}, 2.0));
     lit = floorLit < vPattern.y ? (${f(CURTAIN.lit[0])} + ${f(CURTAIN.lit[1] - CURTAIN.lit[0])} * pane) * mix(${f(CURTAIN.least)}, 1.0, dim) : ${f(CURTAIN.dark)};
   }
+  // Each bay's windows come on once the dusk passes their own point in it, as the kit's do (#284).
+  lit *= step(${f(WAKE.first)} + ${f(WAKE.spread)} * patternHash(vec3(floor(patternAt), seed + 11.0)), patternDusk);
   diffuseColor.rgb = mix(diffuseColor.rgb, glass, worn.g) * shade;
   patternGlass = worn.g;
   patternLit = worn.g * lit;
@@ -889,9 +893,9 @@ if (patternKind > 0.5) {
         )
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += patternLight * patternLit;')
     },
-    /** Light the windows of the patterns as brightly as the kit's glass lights its own. */
-    setGlow(windows: number) {
-      uniforms.patternLight.value.copy(warm).multiplyScalar(windows)
+    /** Light the windows of the patterns as far as the dusk has come (#284), as the kit's glass lights its own. */
+    setGlow(dusk: number) {
+      uniforms.patternDusk.value = dusk
     },
   }
 }

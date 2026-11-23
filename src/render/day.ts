@@ -47,17 +47,28 @@ const SKY = [
   colors('#e6f2f6', '#beeaf9', '#d9ecf3', '#d887ae', '#5a5aa0', '#444c92', '#31398e', '#8a8cc0', '#b8c4e0'),
   colors('#f6efe2', '#e5f8f9', '#ffe4c4', '#fcb17e', '#a07aa8', '#7a6aa0', '#5c61b5', '#e0b0a8', '#f4d0b8'),
 ]
-// Emissive strength of windows and lamps.
-const GLOW = {
-  windows: [0, 0, 0.12, 1.4, 1.5, 1.6, 1.6, 0.6, 0.2],
-  lamps: [0, 0, 0, 4, 5, 5, 5, 2, 0.5],
-}
+// How brightly the lamps glow, all together, as the light fades: what has no point of its own in the dusk follows it
+// (fireflies, beacons, car lights).
+const LAMPS = [0, 0, 0, 4, 5, 5, 5, 2, 0.5]
+// How far the lights are on (#284), 0–1: from none in the late afternoon to all by dusk, and from all as the moon sets
+// to none by the morning, at one pace both ways.
+const DUSK = [0, 0, 0, 1, 1, 1, 1, 1, 0.6]
+/** Emissive strength of a lit window and of a lit lamp (#284): each comes on at full strength, as the night had them. */
+export const FULL = { windows: 1.6, lamps: 5 }
+/**
+ * Where in the dusk the lights come on (#284): the first once the dusk passes `first`, the last at `first + spread`,
+ * clear of either end so that every light is out by day and on at night.
+ */
+export const WAKE = { first: 0.06, spread: 0.88 }
 
 /** What glows at the time of day shown. */
 export interface Glow {
-  /** Emissive strength of the windows. */
-  windows: number
-  /** Emissive strength of the lamps. */
+  /**
+   * How far the lights are on, 0–1 (#284): each window and lamp lights, at full strength (`FULL`), once this passes its
+   * own point in the dusk (`WAKE`), and goes out once it falls back past it.
+   */
+  dusk: number
+  /** Emissive strength the lamps would have all together, for what glows with them and has no point of its own. */
   lamps: number
   /** Strength of car head and tail lights, 0–1. */
   carLights: number
@@ -128,8 +139,8 @@ export function createDay(canvas: HTMLCanvasElement, slab: Bounds) {
     const gradient = `linear-gradient(180deg,${stops.map((c, s) => `#${c.getHexString()} ${s * 50}%`).join(',')})`
     if (gradient !== sky) canvas.style.background = sky = gradient
 
-    const lamps = num(GLOW.lamps)
-    return { windows: num(GLOW.windows), lamps, carLights: Math.min(1, lamps / LIGHTS_ON) }
+    const lamps = num(LAMPS)
+    return { dusk: num(DUSK), lamps, carLights: Math.min(1, lamps / LIGHTS_ON) }
   }
 
   return {

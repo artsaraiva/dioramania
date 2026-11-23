@@ -611,9 +611,9 @@ function foodStall(kit: Kit, x: number, y: number, ry: number) {
   kit.blockZoomProps(() => {
     for (const lx of [-1, 0, 1]) kit.put(SHAPES.thin, STALL.stool, x, y, ry, lx * 0.95, 1.15, KERB, 0.2, 0.62, 0.2)
   })
-  kit.pool('stall', ...to(x, y, ry, 0, 0.6), KERB, 4.6, 3.6, ry)
   kit.shadow(x, y, KERB, 3.8, 2.2, false, ry)
   kit.brick('building', x, y, KERB)
+  kit.pool('stall', ...to(x, y, ry, 0, 0.6), KERB, 4.6, 3.6, ry) // riding its lantern's brick, so it comes on with it (#284)
   lantern(kit, ...to(x, y, ry, 1.5, 0.9), KERB + 2.05, true)
 }
 
