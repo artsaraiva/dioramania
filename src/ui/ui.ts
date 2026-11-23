@@ -10,6 +10,7 @@ import { createCityNotes } from './city-notes'
 import { createGrowth } from './growth'
 import { createJamMarkers } from './jams'
 import { createPaused } from './paused'
+import { createPeople } from './people'
 import { CLICK_SLOP, watchPresses, type Gesture } from './press'
 import { yen } from './readings'
 import { createStageInspector } from './stage-inspector'
@@ -32,8 +33,9 @@ const tripsChange = (change: number) => {
  * Price and Undo (`./toolbar`), the camera's stickers on the right edge with the Stage Inspector's toggle
  * (`./stage-inspector`), and top-left the menu sticker, which pauses the game under the Paused memo and leaves the run
  * through `run` (`./paused`), then the City notes sticker, which opens City notes in the left slot under them
- * (`./city-notes`). The selected Junction's note takes City notes' place in that slot while it is open (`./tools`), and
- * so does the note of a Walker followed (`./walker-note`). While a Layout is in the hand, every click on the board
+ * (`./city-notes`), and People, which lists the Walkers Kept and the Storylets that ended lately (`./people`). The
+ * selected Junction's note takes their place in that slot while it is open (`./tools`), and so does the note of a
+ * Walker followed (`./walker-note`). While a Layout is in the hand, every click on the board
  * drops it. Otherwise the Tools and the route Inspector are used in the world, and a click on a Walker follows them
  * (`./tools`). Drags on the board move the camera, except a drag from a lane end of the selected
  * Junction, which draws a Connection.
@@ -238,7 +240,7 @@ export function createUI(
     view,
     tools,
     () => hand !== null,
-    () => run.screen.cityNotes || tools.selected !== null || view.followed !== null,
+    () => run.screen.cityNotes || people.open || tools.selected !== null || view.followed !== null,
   )
   // A Tile that reaches a Stage shows it there and then.
   game.onStage = (cell, from, to) => view.stageUp(cellBounds(cell), from, to)
@@ -371,8 +373,9 @@ export function createUI(
   leftSlot.className = 'left-slot'
   $('corner').after(leftSlot)
   const cityNotes = createCityNotes($('corner'), leftSlot, game, run.screen)
-  // After City notes, so that while a Junction is selected or a Walker followed its note hides them, and they come back
-  // as it closes.
+  const people = createPeople($('corner'), leftSlot, view)
+  // After City notes and People, so that while a Junction is selected or a Walker followed its note hides them, and
+  // they come back as it closes.
   const walkerPaper = document.createElement('section')
   const walkerNote = createWalkerNote(walkerPaper, view)
   leftSlot.append(junctionNote, walkerPaper)
@@ -426,6 +429,7 @@ export function createUI(
       growth.update()
       stageInspector.update()
       cityNotes.update()
+      people.update()
     },
   }
 }

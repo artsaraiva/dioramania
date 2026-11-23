@@ -1,0 +1,77 @@
+/* People (./people.ts; #290): a paper note in the left slot, laid out as City notes is, its lists scrolling when they
+   run long. */
+.people {
+  position: relative;
+  width: 280px;
+  max-height: calc(100vh - 300px);
+  padding: 22px 22px 18px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.people .tape {
+  left: 96px;
+  top: -10px;
+  width: 86px;
+}
+.people header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.people h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 900;
+}
+.people .close {
+  width: 30px;
+  height: 30px;
+  margin-right: -6px;
+  border-radius: 50%;
+  font-size: 20px;
+  font-weight: 900;
+}
+.people .close:hover {
+  background: rgba(43, 38, 34, 0.07);
+}
+/* The Walkers Kept: each a row to click, their name and what they are doing now. */
+.people .kept {
+  flex: none;
+  max-height: 160px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+.people .kept button {
+  width: 100%;
+  padding: 4px 6px;
+  margin-left: -6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  text-align: left;
+  font-size: 15px;
+}
+.people .kept button:hover {
+  background: rgba(43, 38, 34, 0.07);
+}
+.people .kept b {
+  font-weight: 900;
+}
+.people .kept span {
+  color: var(--quiet);
+}
+.people .empty {
+  font-size: 15px;
+  color: var(--quiet);
+}
+.people .lately {
+  min-height: 0;
+  overflow-y: auto;
+}

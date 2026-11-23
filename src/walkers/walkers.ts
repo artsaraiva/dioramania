@@ -1,6 +1,7 @@
 import { mulberry32 } from '../sim/demand'
 import { around, overlaps, pointAt, polyline, sameBounds, type Bounds, type Polyline, type Vec } from '../sim/geometry'
 import { WALKING_PACE } from '../sim/signals'
+import { STORYLETS, timeOf, type Step, type Storylet, type TimeOfDay } from './storylets'
 
 /** A kind of Walker (#176), drawn with a model of its own: a shopper with a bag, a schoolchild, an office worker. */
 export type Kind = 'shopper' | 'schoolchild' | 'worker'
@@ -126,6 +127,33 @@ export interface Walker {
   time: number
   /** Where their own stream of chances has got to: what they do is drawn from it. */
   luck: number
+  /** Whether the player Keeps them (#290), so that their Storylets go on while the player looks elsewhere: a two both. */
+  kept: boolean
+  /** s the player has Followed them, or the other of their two, since their last Storylet. In a two, the lead's. */
+  followedFor: number
+  /** s till a Storylet may begin for them. In a two, the lead's. */
+  rest: number
+  /**
+   * The Storylet they are in, the beat of it they are at, and whether they have set out on it: one that begins on
+   * their way somewhere waits till they are back. In a two, the lead's.
+   */
+  storylet?: { readonly of: Storylet; beat: number; setOut: boolean }
+  /** Their Storylets, the one they are in last: in a two, one log the two share. */
+  readonly log: LogEntry[]
+}
+
+/** A Storylet in a Walker's log (#290): its title, and the line of each beat done; once it has ended, its end too. */
+interface LogEntry {
+  readonly title: string
+  readonly lines: string[]
+  ended: boolean
+}
+
+/** A Storylet that has ended (#290), as the City's list of them has it: who it happened to, its title and its lines. */
+export interface Ended {
+  readonly who: string
+  readonly title: string
+  readonly lines: readonly string[]
 }
 
 const SPACING = 34 // m of pavement per Walker, or per two
@@ -145,6 +173,11 @@ const ROOM = 0.6 // m between two Walkers who wait, a step apart
 // About five wait at once on a busy Crossroads. Queue them back along the pavement if a crowd shows it.
 const SPARE = 1.5 // m more than their way across that the Walk phase left must carry a Walker for them to start across
 const PATIENCE = 150 // s a Walker waits at the kerb before they give up and stroll on
+const FOLLOWED = 5 // s a Walker is Followed before a Storylet begins for them
+const REST = 30 // s at least, and up to 40 s more, from the end of a Walker's Storylet till the next may begin
+const BEAT = 2 // s at least, and up to 3 s more, from one beat of a Storylet done till the next is set out on
+const SOON = 0.5 // s from a Storylet beginning for a Walker who strolls till they set out on its first beat
+const LATELY = 40 // ended Storylets the City's list of them holds, the newest
 // How many of every ten Walkers are of each kind.
 const DEAL: Kind[] = ['shopper', 'shopper', 'shopper', 'shopper', 'schoolchild', 'schoolchild', 'schoolchild', 'worker', 'worker', 'worker'] // prettier-ignore
 const NAMES = ['Hana', 'Kenji', 'Yui', 'Sora', 'Aoi', 'Ren', 'Mei', 'Daichi', 'Emi', 'Haruto', 'Mio', 'Takumi', 'Rin', 'Kaito', 'Nao', 'Shun', 'Saki', 'Yuto', 'Kana', 'Riku', 'Momo', 'Jun', 'Chie', 'Akira'] // prettier-ignore
@@ -184,7 +217,8 @@ function walker(seed: number, tile: Bounds, line: Polyline, side = 0, lead?: Wal
   const speed = (0.9 + draw() * 0.6) * (draw() < 0.5 ? 1 : -1) * (kind === 'schoolchild' ? 0.85 : 1)
   const [luck, time] = [Math.floor(draw() * 4294967296), 2 + draw() * 18]
   const who = { seed, name, kind, traits, home, job, tile, line, side, s, speed, doing: 'stroll' as const, along: 0, time, luck }
-  return lead ? { ...who, lead, s: lead.s, speed: lead.speed, time: lead.time } : who
+  const life = { kept: false, followedFor: 0, rest: 0, log: lead?.log ?? [] }
+  return lead ? { ...who, ...life, lead, s: lead.s, speed: lead.speed, time: lead.time } : { ...who, ...life }
 }
 
 /** The next of `w`'s chances, 0 to 1: mulberry32, kept as a number so a Walker stays plain data. */
@@ -196,6 +230,10 @@ function roll(w: Walker) {
 }
 /** How long `w` strolls before choosing what to do next, s. */
 const strolling = (w: Walker) => 8 + roll(w) * 24
+/** How long `w` stops on their pavement, s. */
+const stopping = (w: Walker) => 3 + roll(w) * 6
+/** `w` out of their Storylet: the next may begin once they have rested, and once Followed long enough again. */
+const rests = (w: Walker) => Object.assign(w, { storylet: undefined, followedFor: 0, rest: REST + roll(w) * 40 })
 /** How long `w` is indoors on the way up to a terrace or down from it, by the stairs or the lift, s. */
 const stairs = (w: Walker) => 4 + roll(w) * 3
 
@@ -403,14 +441,42 @@ function endsOf(lines: readonly Polyline[], zebras: readonly Zebra[]) {
  * enough left to reach the far kerb, and from there walk the pavement they reached, and go to its Places. What each
  * does, and when, is drawn from their own seed too. A third walk in twos, and a two does all of it together. Nothing
  * in the Sim reads them, and nothing here draws them: `src/render/walkers` does.
+ *
+ * A Storylet (#290) begins for a Walker Followed for five seconds, or Kept, once 30 to 70 s have passed since their
+ * last: one of `storylets` that fits who they are, whether they walk in a two, the time of day and the Places and
+ * Signals their pavement reaches, and never the one they had last. While it runs, what they do next is its next beat,
+ * and each beat's line goes in their log once done; so does its end, and then it goes in the City's list of those
+ * that ended. A beat they can no longer do where they are (the Places gone in a Stage-up, the Signal they waited at
+ * taken away) breaks the Storylet off, and the lines done so far stay in their log.
  */
 export class Walkers {
   private walkers: Walker[] = []
   /** Each pavement's ways to its Places and the zebras' ends on it, by the pavement's centre line. */
   private pavements: { tile: Bounds; loop: Vec[]; line: Polyline; ways: Way[]; zebras: ZebraEnd[] }[] = []
+  /** The Walker the player Follows (#289), if any: a Swap or an Undo that takes them off lets go of them. */
+  followed: Walker | null = null
+  private lately: Ended[] = []
 
-  /** `seed`: the City's. */
-  constructor(private readonly seed: number) {}
+  /** `seed`: the City's; `storylets`, every Storylet there is. */
+  constructor(
+    private readonly seed: number,
+    private readonly storylets: readonly Storylet[] = STORYLETS,
+  ) {}
+
+  /** The Storylets that have ended lately, newest first: they outlast the Walkers they happened to. */
+  get ended(): readonly Ended[] {
+    return this.lately
+  }
+
+  /** The Walkers the player Keeps, a two by its lead, in the order their Tiles were added. */
+  get kept(): readonly Walker[] {
+    return this.walkers.filter((w) => w.kept && !w.lead)
+  }
+
+  /** Keep `w` (#290), so that their Storylets go on while the player looks elsewhere, or let them go: a two together. */
+  keep(w: Walker, kept: boolean) {
+    for (const one of [w, this.otherOfTwo(w)]) if (one) one.kept = kept
+  }
 
   /** Every Walker, in the order their Tiles were added, and each of a two after the one they walk beside. */
   get all(): readonly Walker[] {
@@ -459,6 +525,10 @@ export class Walkers {
       if (!sameBounds(w.tile, tile) || !w.way) continue
       if (w.path) w.s = w.way.s
       Object.assign(w, { doing: 'stroll', way: undefined, path: undefined, along: 0 })
+      // Their Storylet's beat, to set out on again soon, if the Places it needs are still there.
+      if (!w.storylet) continue
+      w.storylet.setOut = false
+      w.time = Math.min(w.time, SOON)
     }
   }
 
@@ -467,18 +537,140 @@ export class Walkers {
     const kept = (t: Bounds) => !tiles.some((tile) => sameBounds(tile, t))
     this.walkers = this.walkers.filter((w) => kept(w.tile))
     this.pavements = this.pavements.filter((p) => kept(p.tile))
+    if (this.followed && !this.walkers.includes(this.followed)) this.followed = null
   }
 
   /**
    * Walk on `dt` seconds, with `simDt` seconds of the Sim's clock: they stroll and do things in real time, and wait at
    * the kerb and cross on the Sim's clock, by the seconds `leftToCross` at each Junction, so that at any speed of the
-   * game they cross in the Walk phase the vehicles stop for.
+   * game they cross in the Walk phase the vehicles stop for. Their Storylets fit `timeOfDay`, 0–1 as the Sim's clock
+   * reads it, and are Followed for in real time.
    */
-  step(dt: number, leftToCross: LeftToCross = () => undefined, simDt = dt) {
+  step(dt: number, leftToCross: LeftToCross = () => undefined, simDt = dt, timeOfDay = 0.25) {
+    // A two's Storylets are its lead's, Followed through either of them.
+    const followed = this.followed && (this.followed.lead ?? this.followed)
     for (const w of this.walkers) {
-      if (w.lead) follow(w, w.lead)
-      else this.live(w, dt, simDt, leftToCross)
+      if (w.lead) {
+        follow(w, w.lead)
+        continue
+      }
+      if (w === followed) w.followedFor += dt
+      w.rest = Math.max(0, w.rest - dt)
+      if (!w.storylet && !w.rest && (w.followedFor >= FOLLOWED || w.kept)) this.begin(w, timeOf(timeOfDay), leftToCross)
+      this.live(w, dt, simDt, leftToCross)
     }
+  }
+
+  /** Begin a Storylet for `w`, at the time of day `now`, if one fits them. */
+  private begin(w: Walker, now: TimeOfDay, leftToCross: LeftToCross) {
+    // Where they will set out on it from: across the Road, if they are on their way over.
+    const line = w.crossing?.to.line ?? w.line
+    const last = w.log.at(-1)?.title
+    const fits = this.storylets.filter(
+      (s) =>
+        (!s.kinds || s.kinds.includes(w.kind)) &&
+        (s.pair === undefined || s.pair === (w.side !== 0)) &&
+        (!s.when || s.when.includes(now)) &&
+        s.title !== last &&
+        this.canDo(
+          w,
+          line,
+          s.beats.map(([step]) => step),
+          leftToCross,
+        ),
+    )
+    if (!fits.length) return
+    const of = fits[Math.floor(roll(w) * fits.length)]
+    w.storylet = { of, beat: 0, setOut: false }
+    w.log.push({ title: of.title, lines: [], ended: false })
+    if (w.doing === 'stroll' && !w.way && !w.crossing) w.time = Math.min(w.time, SOON)
+  }
+
+  /**
+   * Whether `w` can do `steps` in turn from the pavement `line`: each Place there, that a two side by side fit the
+   * way to if they walk in one, and across the Road at a Signal, the steps after it on the far pavement.
+   */
+  private canDo(w: Walker, line: Polyline, steps: readonly Step[], leftToCross: LeftToCross): boolean {
+    const pavement = this.pavements.find((p) => p.line === line)
+    for (const [i, step] of steps.entries()) {
+      if (step === 'cross')
+        return !!pavement?.zebras.some((z) => leftToCross(z.junction) !== undefined && this.canDo(w, z.to, steps.slice(i + 1), leftToCross))
+      if (step !== 'stop' && !pavement?.ways.some((way) => way.place.kind === step && (way.two || !w.side))) return false
+    }
+    return true
+  }
+
+  /**
+   * Set `w` out on their Storylet's beat: false, and the Storylet broken off, if they cannot do it from where they are.
+   */
+  private beat(w: Walker, leftToCross: LeftToCross) {
+    const storylet = w.storylet!
+    const steps = storylet.of.beats.map(([step]) => step)
+    const [step, after] = [steps[storylet.beat], steps.slice(storylet.beat + 1)]
+    if (step === 'stop') Object.assign(w, { doing: 'stop', time: stopping(w) })
+    else if (step === 'cross') {
+      // At a crossing whose far pavement has what the beats after it need.
+      if (!this.crossAt(w, leftToCross, (to) => this.canDo(w, to, after, leftToCross))) return this.breakOff(w)
+    } else {
+      const ways = this.nearest(w, step)
+      if (!ways.length) return this.breakOff(w)
+      w.way = ways[Math.floor(roll(w) * ways.length)]
+      headFor(w, w.way.s)
+    }
+    storylet.setOut = true
+    return true
+  }
+
+  /**
+   * `w` is back strolling their pavement, `done` with what they set out to do or turned back from it. If they had set
+   * out on their Storylet's beat, done, its line goes in their log, and after the last beat, its end, and the Storylet
+   * in the City's list of those that ended; turned back, the Storylet breaks off. If their Storylet began on the way,
+   * they soon set out on its first beat.
+   */
+  private back(w: Walker, done = true) {
+    const storylet = w.storylet
+    if (!storylet) return
+    if (!storylet.setOut) {
+      w.time = Math.min(w.time, SOON)
+      return
+    }
+    if (!done) {
+      this.breakOff(w)
+      return
+    }
+    const entry = w.log.at(-1)!
+    const other = w.side ? this.otherOfTwo(w) : undefined
+    // ponytail: `A` and `B` stand for the names wherever they are a word, so no line may use "A" as the article;
+    // write the names as `{A}` and `{B}` if the library needs one to.
+    const say = (line: string) => line.replace(/\bA\b/g, w.name).replace(/\bB\b/g, other?.name ?? '')
+    entry.lines.push(say(storylet.of.beats[storylet.beat][1]))
+    storylet.setOut = false
+    if (++storylet.beat < storylet.of.beats.length) {
+      w.time = BEAT + roll(w) * 3
+      return
+    }
+    entry.lines.push(say(storylet.of.end))
+    entry.ended = true
+    this.lately.unshift({ who: other ? `${w.name} and ${other.name}` : w.name, title: entry.title, lines: [...entry.lines] })
+    this.lately.length = Math.min(this.lately.length, LATELY)
+    rests(w)
+  }
+
+  /** `w`'s Storylet broken off, and false: the lines done so far stay in their log, and with none, nor does it. */
+  private breakOff(w: Walker) {
+    if (!w.log.at(-1)!.lines.length) w.log.pop()
+    rests(w)
+    return false
+  }
+
+  /** The nearest three ways from `w`'s pavement to Places of the kind `kind`: ways a two fit, if they walk in one. */
+  private nearest(w: Walker, kind: Place['kind']) {
+    const { length } = w.line
+    const gap = (way: Way) => Math.min(wrap(way.s - w.s, length), wrap(w.s - way.s, length))
+    return (this.pavements.find((p) => p.line === w.line)?.ways ?? [])
+      .filter((way) => way.place.kind === kind && (way.two || !w.side))
+      .sort((a, b) => gap(a) - gap(b))
+      .slice(0, 3)
   }
 
   /** `w`'s next `dt` seconds, `simDt` of the Sim's. */
@@ -504,16 +696,23 @@ export class Walkers {
         w.along = Math.min(kerb, w.along + pace)
         const left = leftToCross(junction)
         if (w.along === kerb && left !== undefined && left * WALKING_PACE >= path.length - kerb + SPARE) w.doing = 'cross'
-        else if (left === undefined || (w.time -= simDt) <= 0) strollOn(w, w)
+        else if (left === undefined || (w.time -= simDt) <= 0) {
+          strollOn(w, w)
+          this.back(w, false)
+        }
         break
       }
       case 'cross': {
         const { path, to } = w.crossing!
-        if ((w.along += WALKING_PACE * simDt) >= path.length) strollOn(w, to)
+        if ((w.along += WALKING_PACE * simDt) < path.length) break
+        strollOn(w, to)
+        this.back(w)
         break
       }
       case 'stop':
-        if ((w.time -= dt) <= 0) Object.assign(w, { doing: 'stroll', time: strolling(w) })
+        if ((w.time -= dt) > 0) break
+        Object.assign(w, { doing: 'stroll', time: strolling(w) })
+        this.back(w)
         break
       case 'go': {
         if ((w.along += pace) < w.path!.length) break
@@ -537,31 +736,27 @@ export class Walkers {
       case 'back':
         if ((w.along -= pace) > 0) break
         Object.assign(w, { doing: 'stroll', way: undefined, path: undefined, along: 0, time: strolling(w) })
+        this.back(w)
     }
   }
 
   /**
-   * What `w` does next, strolling: stop, go in at a door, sit on a bench, cross the Road at a Signal, or stroll on.
-   * Where their pavement reaches a terrace, half the doors they would go in at are a terrace's instead (#293), so that
-   * elsewhere nothing changes.
+   * What `w` does next, strolling: their Storylet's next beat, if they are in one they can go on with. Or stop, go in
+   * at a door, sit on a bench, cross the Road at a Signal, or stroll on. Where their pavement reaches a terrace, half
+   * the doors they would go in at are a terrace's instead (#293), so that elsewhere nothing changes.
    */
   private choose(w: Walker, leftToCross: LeftToCross) {
+    if (w.storylet && this.beat(w, leftToCross)) return
     const r = roll(w)
     if (r >= 0.8) {
       if (r >= 0.95 || !this.crossAt(w, leftToCross)) w.time = strolling(w)
       return
     }
-    const { length } = w.line
-    const gap = (way: Way) => Math.min(wrap(way.s - w.s, length), wrap(w.s - way.s, length))
-    const open = (this.pavements.find((p) => p.line === w.line)?.ways ?? []).filter((way) => way.two || !w.side)
-    const goesUp = r >= 0.45 && r < 0.6 && open.some((way) => way.place.kind === 'terrace')
+    const goesUp = r >= 0.45 && r < 0.6 && this.nearest(w, 'terrace').length > 0
     const kind = r < 0.3 ? undefined : goesUp ? 'terrace' : r < 0.6 ? 'door' : 'bench'
-    const ways = open
-      .filter((way) => way.place.kind === kind)
-      .sort((a, b) => gap(a) - gap(b))
-      .slice(0, 3)
+    const ways = kind ? this.nearest(w, kind) : []
     if (!ways.length) {
-      Object.assign(w, { doing: 'stop', time: 3 + roll(w) * 6 })
+      Object.assign(w, { doing: 'stop', time: stopping(w) })
       return
     }
     w.way = ways[Math.floor(roll(w) * ways.length)]
@@ -569,15 +764,15 @@ export class Walkers {
   }
 
   /**
-   * Send `w` to wait at one of the nearest two crossings of their pavement whose Junction has a Signal, at a spot of
-   * the kerb a little along it from the zebra's middle, so that those who wait stand spread along it: a spot nobody
-   * else waits at, if one is free. False if their pavement has none.
+   * Send `w` to wait at one of the nearest two crossings of their pavement whose Junction has a Signal, and whose far
+   * pavement passes `reaches`, at a spot of the kerb a little along it from the zebra's middle, so that those who wait
+   * stand spread along it: a spot nobody else waits at, if one is free. False if their pavement has none.
    */
-  private crossAt(w: Walker, leftToCross: LeftToCross) {
+  private crossAt(w: Walker, leftToCross: LeftToCross, reaches = (_to: Polyline) => true) {
     const { length } = w.line
     const gap = (s: number) => Math.min(wrap(s - w.s, length), wrap(w.s - s, length))
     const zebras = (this.pavements.find((p) => p.line === w.line)?.zebras ?? [])
-      .filter((z) => leftToCross(z.junction) !== undefined)
+      .filter((z) => leftToCross(z.junction) !== undefined && reaches(z.to))
       .sort((a, b) => gap(a.s) - gap(b.s))
       .slice(0, 2)
     if (!zebras.length) return false
