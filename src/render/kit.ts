@@ -5,7 +5,7 @@ import { mulberry32 } from '../sim/demand'
 import type { Bounds, Polyline } from '../sim/geometry'
 import { KERB } from './blocks'
 import { lampBoxes, PART as CAR, type ParkedModel } from './cars'
-import type { Glow } from './day'
+import { FULL, WAKE, type Glow } from './day'
 import { LOW_POLY } from './look'
 import {
   moverWidth,
@@ -24,6 +24,7 @@ import {
 import { clad, createPatterns, curtainGlass, pave, PATTERN, tile, wrap, type Cladding, type Pattern } from './pattern'
 import { canvasTexture, gable, hip, nudge, roughBall, roundedBox, tint, tone } from './shapes'
 import {
+  BOX_VERTICES,
   boxesMeet,
   type Clear,
   type CurtainPane,
@@ -110,8 +111,12 @@ export const HOME = {
 // shop's lit window, `front` m out from it and `deep` m deep. Each pool's colour, the strength of its light in it.
 // Since #175 a shop's front leaves a pool out to the kerb, brighter once its signboard lights (Stage 2) and brighter
 // still under an arcade (Stage 3); a roof terrace's string lights, a street light on a pole, a food stall and a row of
-// capsule machines leave their own.
+// capsule machines leave their own. Each comes on with its light (#284), which glows at least `faintest`, more than a
+// window left dark; and a lamp's pieces of bulb, or a sign's lit marks, stand within `piece` m of one another and
+// come on together.
 export const POOL = {
+  faintest: 0.2,
+  piece: 1.2,
   lamp: 4,
   least: 1.4,
   lantern: 3,
@@ -152,6 +157,8 @@ export const POOL = {
 }
 /** The kerbside's own lights, a lamp at a Block's corner and a street light on a pole, which leave pools on every Tile (#176). */
 const KERBSIDE_POOLS: ReadonlySet<keyof typeof POOL.colours> = new Set(['lamp', 'pole'])
+/** The pools a window lights, not a lamp (#284): before a lit window and a lobby's glass. */
+const WINDOW_POOLS: ReadonlySet<keyof typeof POOL.colours> = new Set(['window', 'lobby'])
 /** Whether a board in `colour` is pale, so that the marks for lettering on it are dark (#175). */
 export function pale(colour: string): boolean {
   const c = new THREE.Color(colour)
@@ -553,6 +560,25 @@ if (blockZoomFade < 1.0 && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.
   const blockZoomDepth = new THREE.MeshDepthMaterial()
   blockZoomDepth.onBeforeCompile = dither
   blockZoomDepth.customProgramCacheKey = () => 'blockZoom depth'
+  // How far the lights are on (#284): each window and lamp, its own point in the dusk in each vertex's `wake`, lights
+  // at full strength once this passes it.
+  const dusk = { value: 0 }
+  /**
+   * `shader`, the glass's or the bulb's, switched on vertex by vertex as the dusk passes each one's `wake`, and then as
+   * bright as its `glow` and its tint's share (`tinted`, in GLSL) have it.
+   */
+  const switched = (shader: THREE.WebGLProgramParametersWithUniforms, tinted: string) => {
+    shader.uniforms.dusk = dusk
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nattribute float glow;\nattribute float wake;\nuniform float dusk;\nvarying float vGlow;',
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvGlow = glow * step(wake, dusk);')
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vGlow;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= ${tinted} * vGlow;`)
+  }
   // One glass for every window, so that windows add no draw calls. Its vertex colour tints it: white for the glass
   // itself, or the ratio to a paler or a darker glass. A darker tint lights its windows less (the glow goes with the
   // square of the tint's green, up to full), and each vertex's `glow` scales how brightly it lights.
@@ -563,19 +589,9 @@ if (blockZoomFade < 1.0 && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.
     roughness: 0.22,
     metalness: 0.1,
     emissive: '#ffc78a',
-    emissiveIntensity: 0,
+    emissiveIntensity: DIM * FULL.windows,
   })
-  glass.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float glow;\nvarying float vGlow;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvGlow = glow;')
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vGlow;')
-      .replace(
-        '#include <emissivemap_fragment>',
-        '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= min(1.0, vColor.g * vColor.g) * vGlow;',
-      )
-  }
+  glass.onBeforeCompile = (shader) => switched(shader, 'min(1.0, vColor.g * vColor.g)') // as `shining` reads it
   const shade = (hex: THREE.ColorRepresentation) => {
     const [c, base] = [new THREE.Color(hex), new THREE.Color(GLASS)]
     return new THREE.Color(c.r / base.r, c.g / base.g, c.b / base.b)
@@ -588,16 +604,9 @@ if (blockZoomFade < 1.0 && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.
     vertexColors: true,
     roughness: 0.4,
     emissive: '#ffd08a',
-    emissiveIntensity: 0,
+    emissiveIntensity: DIM * FULL.lamps,
   })
-  bulb.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float glow;\nvarying float vGlow;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvGlow = glow;')
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vGlow;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= vColor.rgb * vGlow;')
-  }
+  bulb.onBeforeCompile = (shader) => switched(shader, 'vColor.rgb')
   const water = new THREE.MeshStandardMaterial({ color: '#63d1f4', roughness: 0.12, metalness: 0.05 })
   for (const material of [solid, blockZoom, glass, bulb, water]) material.flatShading = LOW_POLY
   // Contact shadows: a blurred dark decal under every building and tree, violet like the shadows the light casts (#148).
@@ -650,11 +659,10 @@ if (blockZoomFade < 1.0 && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.
     squareShadow,
     /** Whether the Zones built to the Finish wear their surface pattern and their light pools. */
     finish,
-    /** Light the windows and lamps as the time of day has them. */
-    setGlow({ windows, lamps }: Glow) {
-      glass.emissiveIntensity = DIM * windows
-      bulb.emissiveIntensity = DIM * lamps
-      patterns?.setGlow(windows)
+    /** Light the windows and lamps as far as the dusk has come (#284): each that its level has passed. */
+    setGlow(glow: Glow) {
+      dusk.value = glow.dusk
+      patterns?.setGlow(glow.dusk)
     },
     /**
      * Show the Block-zoom props as the camera's zoom has them: whole from Tile zoom inward, fading out as the camera
@@ -685,6 +693,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   const sways: Sway[] = []
   const flags: Flag[] = []
   const pools: Pool[] = []
+  const byWindows = new WeakSet<Pool>() // the pools a window lights, not a lamp (#284)
   // What the scene check reads (#191): the ground laid to be kept clear, the scenes and the lots' building forms.
   const claims: Claim[] = []
   // Where a Walker could go, each riding the next brick closed, as a claim does: a door's step, a bench's seat `h`
@@ -732,6 +741,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   /** Whether what is built from here on is to the Finish (`finish`), as far as the materials allow (#178). */
   const finished = () => patterned || pooled
   let open = 0 // parts from here on belong to the next brick
+  let waiting = 0 // pools from here on wait for the next brick to find their light (#284)
   // The Stages built, and the fate and the lot of the bricks closed from now on.
   let stages: Stages = { from: 2, to: 2 }
   let fate: Fate = 'stays'
@@ -749,9 +759,25 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
     ;[rand, fate] = [outer, was]
   }
   const [m, q, up] = [new THREE.Matrix4(), new THREE.Quaternion(), new THREE.Vector3(0, 1, 0)]
-  /** Give every vertex of a geometry of the glass or the bulb the glow `glow`. */
+  /** Where in the dusk a light at `(x, y, z)`, Three coordinates, comes on (#284): drawn from where it stands, to 10 cm. */
+  const wakeAt = (x: number, y: number, z: number) => {
+    const at = (v: number) => Math.round(v * 10)
+    return WAKE.first + (WAKE.spread * (nudge(at(x), at(y), at(z), 1) + 1)) / 2
+  }
+  /**
+   * Give every vertex of a geometry of the glass or the bulb its point in the dusk (#284): one light every `run` vertices,
+   * each lighting as where its first vertex stands has it, so that the same lights come on in the same order on every
+   * load. The whole geometry is one light unless `run` is given.
+   */
+  const waking = (geo: THREE.BufferGeometry, run = geo.attributes.position.count) => {
+    const p = geo.attributes.position
+    const wake = new Float32Array(p.count)
+    for (let i = 0; i < p.count; i += run) wake.fill(wakeAt(p.getX(i), p.getY(i), p.getZ(i)), i, i + run)
+    return geo.setAttribute('wake', new THREE.BufferAttribute(wake, 1))
+  }
+  /** Give every vertex of a geometry of the glass or the bulb the glow `glow`, the whole of it one light (`waking`). */
   const glowing = (geo: THREE.BufferGeometry, glow: number) =>
-    geo.setAttribute('glow', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(glow), 1))
+    waking(geo.setAttribute('glow', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(glow), 1)))
   /**
    * `colour` up to `TONE.by` lighter or darker, by where `geo` stands: low poly (`./look`), parts painted one colour on the
    * soft-lit scenery are not quite one tone, so that a large flat area is not dead, and a part tones the same way on
@@ -908,6 +934,8 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       const own = new Set<number>()
       for (const [part, faces] of built) {
         push(windowGeometry(faces, f.placed), windowLook(part, f.look))
+        const { geometry } = parts[parts.length - 1]
+        if (geometry.attributes.wake) waking(geometry, BOX_VERTICES) // each window comes on by itself (#284)
         parts[parts.length - 1].window = true
         own.add(parts.length - 1)
       }
@@ -1131,7 +1159,10 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
   const pool = (kind: keyof typeof POOL.colours, x: number, y: number, h: number, w: number, d: number, ry = 0) => {
     if (!pooled && !(KERBSIDE_POOLS.has(kind) && materials.finish.pools)) return
     const colour = new THREE.Color(POOL.colours[kind]).multiplyScalar(POOL.strengths[kind])
-    pools.push({ at: new THREE.Vector3(x, h + 0.06, -y), w, d, ry, colour, brick: bricks.length })
+    const at = new THREE.Vector3(x, h + 0.06, -y)
+    const lying = { at, w, d, ry, colour, wake: wakeAt(at.x, at.y, at.z), brick: bricks.length }
+    pools.push(lying)
+    if (WINDOW_POOLS.has(kind)) byWindows.add(lying)
   }
   /** Build what `fn` adds as Block-zoom props, painted on `blockZoom`, which hides them beyond Tile zoom (#175). */
   const blockZoomProps = (fn: () => void) => {
@@ -1176,10 +1207,67 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       leaves,
     )
   }
+  /** How brightly vertex `k` of a geometry of `material`, the glass or the bulb, glows once lit, as its shader has it (`switched`). */
+  const shining = (geometry: THREE.BufferGeometry, material: THREE.Material, k: number) => {
+    const { color, glow } = geometry.attributes
+    const [r, g, b] = [color.getX(k), color.getY(k), color.getZ(k)]
+    return glow.getX(k) * (material === glass ? Math.min(1, g * g) : Math.max(r, g, b))
+  }
+  /**
+   * One point in the dusk for each lamp among the bulbs added since the last brick (#284): the pieces of bulb that stand
+   * within `POOL.piece` m of one another, a lamp's, a sign's lit marks or a string of lights, come on together, as the
+   * first of them would. Each piece is taken where its first corner stands.
+   */
+  const wakeLamps = () => {
+    const lamps: THREE.BufferGeometry[] = []
+    for (let i = open; i < parts.length; i++) if (parts[i].material === bulb) lamps.push(parts[i].geometry)
+    const at = lamps.map((g) => new THREE.Vector3().fromBufferAttribute(g.attributes.position, 0))
+    const first = lamps.map((_, i) => i) // each piece's link toward the first piece of its lamp
+    const find = (i: number): number => (first[i] === i ? i : (first[i] = find(first[i])))
+    for (let i = 1; i < lamps.length; i++)
+      for (let j = 0; j < i; j++)
+        if (at[i].distanceTo(at[j]) < POOL.piece) {
+          const [a, b] = [find(i), find(j)]
+          first[Math.max(a, b)] = Math.min(a, b)
+        }
+    lamps.forEach((g, i) => (g.attributes.wake.array as Float32Array).fill(lamps[find(i)].attributes.wake.getX(0)))
+  }
+  /**
+   * Light each pool laid since the last brick with its light (#284), so that it comes on with its lamp: the bulb nearest
+   * it of those added since then, or the glass for a pool a window lights (`WINDOW_POOLS`), and the other if there is
+   * none; of those that glow `POOL.faintest` at least. A mover's brick between them, as a tower's lift is, changes
+   * nothing.
+   * ponytail: a pool whose light was built in another brick keeps a point of its own and lights apart from it, as none
+   * of the nine Zones does at Stage 3 today. Pass the light's point to `pool` if a Zone ever lays a pool apart from its
+   * lamp.
+   */
+  const wakePools = () => {
+    const v = new THREE.Vector3()
+    /** The point of the light of `material` nearest `at` among those added since the last brick, if one glows enough. */
+    const nearest = (at: THREE.Vector3, material: THREE.Material) => {
+      let [near, wake] = [Infinity, undefined as number | undefined]
+      for (let i = open; i < parts.length; i++) {
+        const { geometry } = parts[i]
+        if (parts[i].material !== material) continue
+        for (let k = 0; k < geometry.attributes.position.count; k++) {
+          const d = at.distanceToSquared(v.fromBufferAttribute(geometry.attributes.position, k))
+          if (d < near && shining(geometry, material, k) >= POOL.faintest) [near, wake] = [d, geometry.attributes.wake.getX(k)]
+        }
+      }
+      return wake
+    }
+    for (const p of pools.slice(waiting)) {
+      const [mine, other] = byWindows.has(p) ? [glass, bulb] : [bulb, glass]
+      p.wake = nearest(p.at, mine) ?? nearest(p.at, other) ?? p.wake
+    }
+    waiting = pools.length
+  }
   /** Close the shapes added since the last brick into one, which lands on `(x, y)`, `h` above the road. */
   const brick = (kind: BrickKind, x: number, y: number, h: number, dust = 0) => {
     if (open === parts.length) return
     if (held.length) buildWindows(h)
+    wakeLamps()
+    wakePools()
     for (let i = open; i < parts.length; i++) parts[i].brick = bricks.length
     open = parts.length
     bricks.push(made(kind, new THREE.Vector3(x, h, -y), dust))
@@ -1476,6 +1564,7 @@ export function createKit(rand: () => number, materials: Materials, label?: () =
       lists.forEach((l, i) => (l.length = at[i]))
       claims.push(...kept.map((c) => ({ ...c, brick: bricks.length }))) // riding the next brick closed, as they did
       open = parts.length
+      waiting = Math.min(waiting, pools.length)
     },
 
     /** How much the kit has built so far, to read back what it builds from here on (`since`). */

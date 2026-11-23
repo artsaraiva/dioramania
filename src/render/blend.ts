@@ -15,9 +15,9 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 // To hold the frame budget the shade is drawn at half the canvas's resolution, with half the prototype's samples.
 const SHADE = { radius: 2.6, distanceExponent: 1.4, thickness: 1.4, scale: 1.25, samples: 8, blend: 0.9, resolution: 0.5 }
 const DENOISE = { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 3, radiusExponent: 1.5, rings: 2, samples: 8 }
-// Only what is brighter than white glows: almost nothing by day, restrained at night, as far as the lamps are on (their
-// glow, `./day`'s, at which the night's strength is reached).
-const GLOW = { day: 0.06, night: 0.26, radius: 0.42, threshold: 1, lamps: 4 }
+// Only what is brighter than white glows: almost nothing by day, restrained at night, as far as the lights are on (the
+// dusk, `./day`'s, #284).
+const GLOW = { day: 0.06, night: 0.26, radius: 0.42, threshold: 1 }
 // The lens: the blur at the top and foot of the frame (CSS px), the half-height of the band in focus across the middle
 // (a share of the frame), the colour's boost, and how much darker the corners are.
 const LENS = { blur: 4.5, band: 0.3, saturation: 1.12, corners: 0.32 }
@@ -153,8 +153,8 @@ export function createBlend(
       lens.uniforms.blur.value = LENS.blur * ratio
     },
 
-    /** Draw the scene under the sky `stops` (top, middle, bottom), glowing as far as the lamps' glow `lamps` has it. */
-    render(stops: readonly THREE.Color[], lamps: number) {
+    /** Draw the scene under the sky `stops` (top, middle, bottom), glowing as far as the lights are on (`dusk`, 0–1). */
+    render(stops: readonly THREE.Color[], dusk: number) {
       const css = stops.map((c) => c.getHexString()).join()
       if (css !== painted) {
         painted = css
@@ -165,7 +165,7 @@ export function createBlend(
         g.fillRect(0, 0, paper.width, paper.height)
         sky.needsUpdate = true
       }
-      glow.strength = GLOW.day + (GLOW.night - GLOW.day) * Math.min(1, lamps / GLOW.lamps)
+      glow.strength = GLOW.day + (GLOW.night - GLOW.day) * dusk
 
       // Every frame, since the screen's pieces come and go.
       for (const root of screen) root.traverse((o) => o.layers.set(SCREEN))
