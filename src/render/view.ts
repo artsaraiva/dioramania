@@ -438,6 +438,22 @@ export function createView(
     /** The other of `walker`'s two, if they walk in one. */
     otherOfTwo: walkers.otherOfTwo,
 
+    /**
+     * Keep `walker` and the other of their two (#290), so that their Storylets go on while the player looks elsewhere,
+     * or let them go.
+     */
+    keep: walkers.keep,
+
+    /** The Walkers the player Keeps, a two by its lead. */
+    get kept() {
+      return walkers.kept
+    },
+
+    /** The Storylets that ended lately, newest first: they outlast the Walkers they happened to. */
+    get ended() {
+      return walkers.ended
+    },
+
     /** Show the Tools in the world as `state` has them. */
     showTools(state: ToolState) {
       tools.show(state)
@@ -661,10 +677,16 @@ export function createView(
       // far out.
       const metres = perPixel()
       const junctions = new Map(shown.net.junctions.map((j) => [j.id, j]))
-      walkers.update(dt, metres, simDt, (id: string) => {
-        const junction = junctions.get(id)
-        return junction && leftToCross(junction)
-      })
+      walkers.update(
+        dt,
+        metres,
+        simDt,
+        (id: string) => {
+          const junction = junctions.get(id)
+          return junction && leftToCross(junction)
+        },
+        day.time,
+      )
       hand.update(metres)
       rezoning.update(metres)
       tools.update()

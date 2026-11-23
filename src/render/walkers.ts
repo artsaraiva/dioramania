@@ -245,9 +245,7 @@ export function createWalkers(seed: number) {
   /** How high the soles of `walker`'s feet are, shown as `look`: lower as they sit. */
   const footOf = (walker: Walker, look: { sit: number; h: number }) => look.h - look.sit * (FIGURES[walker.kind].hip - SEAT)
 
-  /** The Walker the player Follows, and the marker over them. */
-  let followed: Walker | null = null
-  // Unlit, so it reads the same by night, each face a tone of its own, its top faces lighter: it glints as it turns.
+  // The marker over the Walker the player Follows. Unlit, so it reads the same by night, each face a tone of its own, its top faces lighter: it glints as it turns.
   const facets = new THREE.OctahedronGeometry(0.5).scale(MARKER.size * 0.67, MARKER.size, MARKER.size * 0.67)
   const tones = new Float32Array(facets.attributes.position.count * 3)
   const yellow = new THREE.Color(MARKER.colour)
@@ -297,16 +295,29 @@ export function createWalkers(seed: number) {
 
     /** The Walker the player Follows, if any: a Swap or an Undo that takes them off lets go of them. */
     get followed() {
-      return followed
+      return walkers.followed
     },
 
     /** Follow `walker`, or nobody. */
     follow(walker: Walker | null) {
-      followed = walker
+      walkers.followed = walker
     },
 
     /** The other of `walker`'s two, if they walk in one. */
     otherOfTwo: (walker: Walker) => walkers.otherOfTwo(walker),
+
+    /** Keep `walker` and the other of their two (#290), or let them go (see `Walkers.keep`). */
+    keep: (walker: Walker, kept: boolean) => walkers.keep(walker, kept),
+
+    /** The Walkers the player Keeps, a two by its lead. */
+    get kept() {
+      return walkers.kept
+    },
+
+    /** The Storylets that ended lately, newest first. */
+    get ended() {
+      return walkers.ended
+    },
 
     /**
      * The Walker drawn nearest the canvas pixel (`px`, `py`), if the pixel is on their figure or within `slack` px of
@@ -357,18 +368,17 @@ export function createWalkers(seed: number) {
     /** Take the walkers off the pieces of slab `pieces`, which a Swap or an Undo is lifting. */
     remove(pieces: Bounds[]) {
       walkers.takeOff(pieces)
-      if (followed && !walkers.all.includes(followed)) followed = null
       remesh()
     },
 
     /**
      * `dt` is the real seconds since the last frame, 0 while paused; `perPixel`, the m of ground a CSS pixel spans.
      * The Walkers wait at the kerb and cross on the Sim's `simDt` seconds since then, by the seconds `leftToCross` at
-     * each Junction (see `Walkers.step`).
+     * each Junction, and their Storylets fit `timeOfDay` (see `Walkers.step`).
      */
-    update(dt: number, perPixel: number, simDt: number, leftToCross: LeftToCross) {
+    update(dt: number, perPixel: number, simDt: number, leftToCross: LeftToCross, timeOfDay: number) {
       t += dt
-      walkers.step(dt, leftToCross, simDt)
+      walkers.step(dt, leftToCross, simDt, timeOfDay)
       const index = new Map<Kind, number>(ORDER.map((k) => [k, 0]))
       const ease = Math.min(1, dt * EASE)
       for (const walker of walkers.all) {
@@ -425,6 +435,7 @@ export function createWalkers(seed: number) {
         mesh.instanceMatrix.needsUpdate = true
         mesh.geometry.attributes.pose.needsUpdate = true
       }
+      const { followed } = walkers
       const look = followed && shown.get(followed)
       marker.visible = !!look
       if (!followed || !look) return
