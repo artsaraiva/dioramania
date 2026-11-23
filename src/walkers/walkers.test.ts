@@ -286,3 +286,17 @@ it('a beat’s line reaches the log once it is done: across the Road, never whil
   expect(walkers.all.flatMap((w) => w.log.flatMap((entry) => entry.lines))).toEqual([])
   expect(walkers.all.some((w) => w.doing === 'wait')).toBe(true)
 })
+
+it('a Walker whose pavement reaches no Place or Signal still has Storylets, alone or in a two, at any time of day', () => {
+  for (const timeOfDay of [0, 0.25, 0.5, 0.75]) {
+    const walkers = new Walkers(7)
+    walkers.add(WEST, [pavement(WEST, 12)])
+    for (const w of walkers.all) walkers.keep(w, true)
+    for (let t = 0; t < 120; t += 0.1) walkers.step(0.1, undefined, 0.1, timeOfDay)
+    expect(
+      walkers.all.some((w) => w.lead),
+      'a two walks there',
+    ).toBe(true)
+    for (const w of walkers.all) expect(w.log.some((entry) => entry.ended)).toBe(true)
+  }
+})

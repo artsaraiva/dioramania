@@ -28,11 +28,48 @@ export interface Storylet {
 export const timeOf = (t: number): TimeOfDay => (t < 0.18 || t > 0.92 ? 'morning' : t < 0.42 ? 'day' : t < 0.6 ? 'dusk' : 'night')
 
 /**
- * Every Storylet: the prototype's that need only shops, benches, windows and a Signal to cross at, and two that go up
- * to a terrace (#293). The prototype's that need a door of the Walker's own wait for one (#291). Adding one is adding
- * data here.
+ * Every Storylet: the prototype's that need only shops, benches, windows and a Signal to cross at, two that go up to a
+ * terrace (#293), and four of stops alone, two for one alone and two for a two at any time of day, so that a Walker
+ * whose pavement reaches no Place has Storylets too, and never only the one they had last. The prototype's that need
+ * a door of the Walker's own wait for one (#291). Adding one is adding data here.
  */
 export const STORYLETS: readonly Storylet[] = [
+  {
+    title: 'Lost in thought',
+    pair: false,
+    beats: [
+      ['stop', 'A stopped, sure they had forgotten something.'],
+      ['stop', 'A stopped again, and remembered what it was.'],
+    ],
+    end: 'A walked on, lighter for it.',
+  },
+  {
+    title: 'Watching the world',
+    pair: false,
+    beats: [
+      ['stop', 'A stopped to watch the road go by.'],
+      ['stop', 'A found a better spot and watched some more.'],
+    ],
+    end: 'A had seen enough for one day and walked on.',
+  },
+  {
+    title: 'Catching up',
+    pair: true,
+    beats: [
+      ['stop', 'A and B stopped to catch up.'],
+      ['stop', 'A and B stopped again. There was more.'],
+    ],
+    end: 'A and B walked on, caught up at last.',
+  },
+  {
+    title: 'Agreeing to differ',
+    pair: true,
+    beats: [
+      ['stop', 'A and B stopped, not agreeing.'],
+      ['stop', 'B gave in, and then so did A.'],
+    ],
+    end: 'A and B walked on, neither sure who had won.',
+  },
   {
     title: 'Dinner, eventually',
     kinds: ['shopper', 'worker'],
