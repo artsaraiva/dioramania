@@ -9,12 +9,14 @@ import { createField } from '../../../src/render/field'
 import { createMaterials, type Kit, type Materials } from '../../../src/render/kit'
 import { moverModel, moverWidth } from '../../../src/render/movers'
 import { createScenery, SEEDED, type Watch } from '../../../src/render/scenery'
+import { INSET } from '../../../src/render/walkers'
 import { LOOKS } from '../../../src/render/zones'
 import type { Network } from '../../../src/sim/network'
 import { cellAt, cellBounds } from '../../../src/sim/tiles'
+import { Walkers } from '../../../src/walkers/walkers'
 import { facesOf } from './faces'
 import { area, boxOf, hull, turnedBox } from './geometry'
-import type { Block, Claim, Hull, Lot, Mover, Pt, Report, Roof, Scene, Thing, Wall } from './report'
+import type { Block, Claim, Door, Hull, Lot, Mover, Pt, Report, Roof, Scene, Thing, Wall } from './report'
 
 // A canvas that paints nothing, for the textures the materials draw (contact shadows, the surface pattern's layers).
 const pen = new Proxy(
@@ -228,6 +230,7 @@ export function buildReport(ask: Ask): Report {
   const walls: Wall[] = []
   const roofs: Roof[] = []
   const pools: Report['pools'] = []
+  const doors: Door[] = []
   const moving: Record<string, number> = {}
   const painted = new Map<number, number>() // triangles by linear colour, 12 bits a channel
 
@@ -357,6 +360,11 @@ export function buildReport(ask: Ask): Report {
       if (things[first + p.brick]) things[first + p.brick].pools++
       pools.push({ x: p.at.x, y: -p.at.z, r: Math.max(p.w, p.d) / 2 })
     }
+    for (const p of built.places ?? []) {
+      if (p.kind !== 'door' || block < 0) continue
+      const lot = built.bricks[p.brick]?.lot ?? -1
+      doors.push({ tile: blocks[block].tile, block, lot, at: { x: p.x, y: p.y }, reached: false })
+    }
     for (const c of built.claims ?? []) {
       const t = things[first + c.brick] ?? things[things.length - 1]
       claims.push({ kind: c.kind, tile: t.tile, block, hull: turnedBox(c.x, c.y, c.w, c.d, c.ry), thing: t.id })
@@ -392,6 +400,20 @@ export function buildReport(ask: Ask): Report {
   const builds = game.city.tiles.map((t) => scenery.lay(game.sim, [cellBounds(t.cell)]))
   const meshes = builds.flatMap((b) => b.meshes)
   const ms = performance.now() - start
+  // Which doors a Walker reaches (#291): each Tile's Walkers' ways from its pavements to its Places, as the game finds
+  // them. The ref a baseline is built from may predate `reached`, and no rule reads a baseline's doors.
+  // ponytail: a ref from before the Walkers (#286) has no `src/walkers` to import, and its baseline fails to build. Import
+  // it dynamically, and skip the doors where it is missing, if `--against` such a ref is ever needed.
+  const walkers = new Walkers(ask.seed)
+  if (typeof walkers.reached === 'function') {
+    const reached = new Set<string>()
+    game.city.tiles.forEach((t, i) => {
+      const piece = cellBounds(t.cell)
+      walkers.add(piece, field.outlines(INSET, [piece]), builds[i].places, builds[i].obstacles)
+      for (const p of walkers.reached(piece)) reached.add(`${p.x},${p.y}`)
+    })
+    for (const d of doors) d.reached = reached.has(`${d.at.x},${d.at.y}`)
+  }
   for (const b of blocks) b.kerb = kerbOf(b.loop, game.sim.net)
   const colours: Record<string, number> = {}
   const colour = new THREE.Color()
@@ -418,6 +440,7 @@ export function buildReport(ask: Ask): Report {
     moving,
     colours,
     vehicles: hooked ? vehicles(game.sim.net) : [],
+    doors,
     blockZoomHidden,
     triangles: meshes.reduce((n, m) => n + (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3, 0),
     meshes: meshes.length,

@@ -1,15 +1,17 @@
 import * as THREE from 'three'
-import { pointAt, type Bounds, type Vec } from '../sim/geometry'
+import type { Cell, Zone } from '../city/city'
+import { middle, pointAt, type Bounds, type Vec } from '../sim/geometry'
 import type { Network } from '../sim/network'
 import { takesSignal } from '../sim/signals'
-import { whereIs, Walkers, type Kind, type LeftToCross, type Place, type Walker, type Zebra } from '../walkers/walkers'
+import { cellAt } from '../sim/tiles'
+import { whereIs, Walkers, type Kind, type LeftToCross, type Own, type Place, type Walker, type Zebra } from '../walkers/walkers'
 import { KERB } from './blocks'
 import { inside, type Field } from './field'
 import { LOW_POLY } from './look'
 import { ZEBRA } from './roads'
 import { merged, part, takesPaint, tint } from './shapes'
 
-const INSET = 1.6 // m in from the kerb: the pavement's centre line
+export const INSET = 1.6 // m in from the kerb: the pavement's centre line
 // The cars' colours, a walker's paint: every walker wears one, on whatever of its model takes paint (`model`).
 const SHIRTS = ['#db6982', '#009dcb', '#ffc52d', '#ffffff', '#64cb9f', '#bc9ef2', '#2f3440', '#ff9cbb'].map((c) => new THREE.Color(c))
 // What a Walker wears, and where in its stride it is, from bits of its own seed: the same Walker looks the same every time.
@@ -186,14 +188,32 @@ function zebrasOf(net: Network, piece: Bounds): Zebra[] {
 }
 
 /**
+ * What a door is to a Walker who has one of their own on a Tile of each Zone (#291): a home on a residential one, a shop
+ * they keep, or the plant they work at. On the others, a door is nobody's own.
+ */
+const OWN_BY_ZONE: Partial<Record<Zone['id'], Own>> = {
+  'low-density': 'home',
+  'medium-density': 'home',
+  'high-density': 'home',
+  shops: 'shop',
+  industrial: 'plant',
+}
+
+/**
  * The City's Walkers on the pavement, one instanced mesh per kind (#176), as `../walkers/walkers` has them: who each
- * is, where they walk and what they do comes from there, seeded `seed`, the City's. Each faces the way it walks, its
+ * is, where they walk and what they do comes from there, seeded `seed`, the City's, and from the Zone `zoneOf` a cell
+ * has now, which says what a door there is to a Walker with one of their own (#291). Each faces the way it walks, its
  * legs and arms swinging in step with the ground it covers (#287), and stops swinging as it stops (#288): it goes out
  * of sight in at a door, sits down on a bench, turns its head about, and stopped, or sat beside the other of a two, talks with a hand;
  * its shadow moves with it. The one the player Follows (#289) wears a marker over their head, in `marker`, a screen
  * piece drawn over the blend: indoors, it waits over the door.
  */
-export function createWalkers(seed: number) {
+export function createWalkers(seed: number, zoneOf: (cell: Cell) => Zone | undefined) {
+  /** What a door on the piece of slab `piece` is to a Walker with one of their own, by its Tile's Zone. */
+  const ownOn = (piece: Bounds) => {
+    const zone = zoneOf(cellAt(middle(piece)))
+    return zone && OWN_BY_ZONE[zone.id]
+  }
   const group = new THREE.Group()
   const models = new Map(ORDER.map((k) => [k, model(FIGURES[k].parts(FIGURES[k].hip))]))
   // How tall each kind stands, to the top of its head.
@@ -306,6 +326,9 @@ export function createWalkers(seed: number) {
     /** The other of `walker`'s two, if they walk in one. */
     otherOfTwo: (walker: Walker) => walkers.otherOfTwo(walker),
 
+    /** What `walker` is doing now, in a few words, and whose door it is (see `Walkers.doingNow`). */
+    doingNow: (walker: Walker) => walkers.doingNow(walker),
+
     /** Keep `walker` and the other of their two (#290), or let them go (see `Walkers.keep`). */
     keep: (walker: Walker, kept: boolean) => walkers.keep(walker, kept),
 
@@ -355,14 +378,18 @@ export function createWalkers(seed: number) {
           places,
           obstacles,
           zebrasOf(net, piece),
+          ownOn(piece),
         )
       }
       remesh()
     },
 
-    /** The `places` and `obstacles` of the pieces of slab `pieces` as they stand after a Stage-up or a Rezoning. */
+    /**
+     * The `places` and `obstacles` of the pieces of slab `pieces` as they stand after a Stage-up or a Rezoning, and the
+     * Zone each has now.
+     */
     refit(pieces: Bounds[], places: readonly Place[], obstacles: readonly Vec[][]) {
-      for (const piece of pieces) walkers.refit(piece, places, obstacles)
+      for (const piece of pieces) walkers.refit(piece, places, obstacles, ownOn(piece))
     },
 
     /** Take the walkers off the pieces of slab `pieces`, which a Swap or an Undo is lifting. */

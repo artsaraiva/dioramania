@@ -88,10 +88,13 @@ export interface Way {
   readonly two: boolean
 }
 
+/** What a door of a Walker's own is to them (#291): their home, a shop they keep, or the plant they work at. */
+export type Own = 'home' | 'shop' | 'plant'
+
 /**
  * A person of the City: who they are, drawn once from their seed, and where on their pavement they walk.
  * ponytail: `home` is a phrase from a short list and names no door in the City, and with 24 names two Walkers can
- * share one. #291 gives a resident a door of their own; the lists grow as Storylets need them.
+ * share one; a Walker with a home of their own (`own`) lives at its door instead. The lists grow as Storylets need them.
  */
 export interface Walker {
   /** Their own seed, from the City's seed and where their pavement lies: all they are was drawn from it. */
@@ -111,6 +114,12 @@ export interface Walker {
   readonly side: number
   /** In a two, the one they walk beside and do as. */
   readonly lead?: Walker
+  /**
+   * A door of their own (#291), on their Block, and what it is to them, if they have one: drawn from their seed and
+   * the doors their Block's pavement reaches, so that the same City gives them the same door. In a two, the lead's,
+   * which the other shares unless a schoolchild at a shop or a plant.
+   */
+  own?: { readonly kind: Own; readonly door: Place }
   /** m round `line`. */
   s: number
   /** m/s, either way round. */
@@ -177,7 +186,47 @@ const FOLLOWED = 5 // s a Walker is Followed before a Storylet begins for them
 const REST = 30 // s at least, and up to 40 s more, from the end of a Walker's Storylet till the next may begin
 const BEAT = 2 // s at least, and up to 3 s more, from one beat of a Storylet done till the next is set out on
 const SOON = 0.5 // s from a Storylet beginning for a Walker who strolls till they set out on its first beat
+const HOME = 0.28 // of the times a Walker with a door of their own on the pavement they walk chooses what to do, they go in at it
 const LATELY = 40 // ended Storylets the City's list of them holds, the newest
+/**
+ * A door of a Walker's own, by what it is to them (#291): the share of those who may have one who do, the lead of a two
+ * or one alone, and no schoolchild for a shop or a plant, so that of all a Tile's Walkers most have a home, about a
+ * third keep a shop and most work at a plant, the other of a two sharing the lead's; and what their note says of it,
+ * where they live or what they do, heading for it and inside, and of a visit to it, by `host`, whose own it is.
+ */
+const OWN: Record<
+  Own,
+  {
+    share: number
+    home?: string
+    job?: string
+    heading: string
+    inside: string
+    visit: (host: string) => { heading: string; inside: string }
+  }
+> = {
+  home: {
+    share: 0.85,
+    home: 'a home on this Block',
+    heading: 'heading home',
+    inside: 'at home',
+    visit: (host) => ({ heading: `calling on ${host}`, inside: `at ${host}'s` }),
+  },
+  shop: {
+    share: 0.5,
+    job: 'keeps a shop on this Block',
+    heading: 'heading back to the shop',
+    inside: 'minding the shop',
+    visit: (host) => ({ heading: `heading for ${host}'s shop`, inside: `in ${host}'s shop` }),
+  },
+  plant: {
+    share: 0.85,
+    job: 'works at the plant on this Block',
+    heading: 'heading in to work',
+    inside: 'at work',
+    visit: (host) => ({ heading: `heading for the plant where ${host} works`, inside: `in the plant where ${host} works` }),
+  },
+}
 // How many of every ten Walkers are of each kind.
 const DEAL: Kind[] = ['shopper', 'shopper', 'shopper', 'shopper', 'schoolchild', 'schoolchild', 'schoolchild', 'worker', 'worker', 'worker'] // prettier-ignore
 const NAMES = ['Hana', 'Kenji', 'Yui', 'Sora', 'Aoi', 'Ren', 'Mei', 'Daichi', 'Emi', 'Haruto', 'Mio', 'Takumi', 'Rin', 'Kaito', 'Nao', 'Shun', 'Saki', 'Yuto', 'Kana', 'Riku', 'Momo', 'Jun', 'Chie', 'Akira'] // prettier-ignore
@@ -219,6 +268,29 @@ function walker(seed: number, tile: Bounds, line: Polyline, side = 0, lead?: Wal
   const who = { seed, name, kind, traits, home, job, tile, line, side, s, speed, doing: 'stroll' as const, along: 0, time, luck }
   const life = { kept: false, followedFor: 0, rest: 0, log: lead?.log ?? [] }
   return lead ? { ...who, ...life, lead, s: lead.s, speed: lead.speed, time: lead.time } : { ...who, ...life }
+}
+
+/**
+ * Draw `w`'s door of their own (#291) from those `ways` go to, their Block's pavement's, where a door is `own` to
+ * whoever has one; or none. Whether they have one is drawn from a stream of their seed's own, so that all else they are
+ * is drawn as before; and which, by where the doors stand rather than the order they were noted in, so that the same
+ * doors give them the same door however the City was built. The other of a two shares the lead's, as they go in
+ * together: they live, keep a shop or work there too, a schoolchild only at home.
+ */
+function drawOwn(w: Walker, ways: readonly Way[], own: Own | undefined) {
+  const may = (kind: Own) => kind === 'home' || w.kind !== 'schoolchild'
+  if (w.lead) {
+    w.own = w.lead.own && may(w.lead.own.kind) ? w.lead.own : undefined
+    return
+  }
+  const draw = mulberry32(w.seed ^ 0x0d0045)
+  const [has, which] = [draw(), draw()]
+  const doors = ways
+    .filter((way) => way.place.kind === 'door' && (way.two || !w.side))
+    .map((way) => way.place)
+    .sort((a, b) => a.x - b.x || a.y - b.y)
+  const fits = own && may(own) && doors.length > 0 && has < OWN[own].share
+  w.own = fits ? { kind: own, door: doors[Math.floor(which * doors.length)] } : undefined
 }
 
 /** The next of `w`'s chances, 0 to 1: mulberry32, kept as a number so a Walker stays plain data. */
@@ -376,39 +448,11 @@ export function whereIs(w: Walker): { x: number; y: number; heading: number; h?:
   return { ...at, heading: p.heading + (left ? Math.PI / 2 : -Math.PI / 2) }
 }
 
-/** What `w` is doing now, in a few words, as the note of a Walker the player Follows says it. */
-export function doingNow(w: Walker): string {
-  const place = w.way?.place
-  const bench = place?.kind === 'bench'
-  switch (w.doing) {
-    case 'stroll':
-      return w.crossing
-        ? 'heading for the crossing'
-        : !place
-          ? 'out for a stroll'
-          : bench
-            ? 'heading for a bench'
-            : place.kind === 'door'
-              ? 'on an errand'
-              : 'heading for a terrace'
-    case 'stop':
-      return w.side ? 'stopped for a chat' : 'looking in a window'
-    case 'go':
-      return bench ? 'sitting down on a bench' : 'going indoors'
-    case 'act':
-      return bench ? 'resting on a bench' : place?.kind === 'door' ? 'indoors' : 'on the way up'
-    case 'up':
-      return place?.kind === 'terrace' && place.up.sit ? 'sitting out on a terrace' : 'out on a terrace'
-    case 'down':
-      return 'on the way down'
-    case 'back':
-      return bench ? 'getting up from the bench' : 'coming back out'
-    case 'wait':
-      return 'waiting to cross'
-    case 'cross':
-      return 'crossing the road'
-  }
-}
+/** Where `w` lives, as their note says it: at their own door, if it is their home (#291). */
+export const homeOf = (w: Walker) => (w.own && OWN[w.own.kind].home) ?? w.home
+
+/** What `w` does, as their note says it: keep a shop or work at a plant, if their own door is one (#291). */
+export const jobOf = (w: Walker) => (w.own && OWN[w.own.kind].job) ?? w.job
 
 /**
  * The ends of the zebras of `zebras` that join two of the pavements `lines` of one Tile, by the pavement each is on.
@@ -438,21 +482,26 @@ function endsOf(lines: readonly Polyline[], zebras: readonly Zebra[]) {
  * centre line of one Block's pavement, and leaves it only for a Place on its Block, to go in at a door and come out,
  * sit on a bench, or go in at a door, up onto its building's terrace a while (#293) and back down and out; or to cross
  * the Road at a Signal of their own Tile (#296): they wait at the kerb, facing across, for a Walk phase with time
- * enough left to reach the far kerb, and from there walk the pavement they reached, and go to its Places. What each
- * does, and when, is drawn from their own seed too. A third walk in twos, and a two does all of it together. Nothing
- * in the Sim reads them, and nothing here draws them: `src/render/walkers` does.
+ * enough left to reach the far kerb, and from there walk the pavement they reached, and go to its Places. Where the
+ * doors of a Tile are homes, shops or plants, most of its Walkers have a home of their own, about a third a shop they
+ * keep and most a plant they work at (#291): they go in and out of that door, and stay longer than a visitor would. What
+ * each does, and when, is drawn from their own seed too. A third walk in twos, and a two does all of it together.
+ * Nothing in the Sim reads them, and nothing here draws them: `src/render/walkers` does.
  *
  * A Storylet (#290) begins for a Walker Followed for five seconds, or Kept, once 30 to 70 s have passed since their
- * last: one of `storylets` that fits who they are, whether they walk in a two, the time of day and the Places and
- * Signals their pavement reaches, and never the one they had last. While it runs, what they do next is its next beat,
+ * last: one of `storylets` that fits who they are, whether they walk in a two, the time of day, the door of their own
+ * it needs, if any, and the Places and Signals their pavement reaches, and never the one they had last. While it runs, what they do next is its next beat,
  * and each beat's line goes in their log once done; so does its end, and then it goes in the City's list of those
  * that ended. A beat they can no longer do where they are (the Places gone in a Stage-up, the Signal they waited at
  * taken away) breaks the Storylet off, and the lines done so far stay in their log.
  */
 export class Walkers {
   private walkers: Walker[] = []
-  /** Each pavement's ways to its Places and the zebras' ends on it, by the pavement's centre line. */
-  private pavements: { tile: Bounds; loop: Vec[]; line: Polyline; ways: Way[]; zebras: ZebraEnd[] }[] = []
+  /**
+   * Each pavement's ways to its Places and the zebras' ends on it, by the pavement's centre line, and the Walkers whose
+   * Block's it is.
+   */
+  private pavements: { tile: Bounds; loop: Vec[]; line: Polyline; ways: Way[]; zebras: ZebraEnd[]; walkers: Walker[] }[] = []
   /** The Walker the player Follows (#289), if any: a Swap or an Undo that takes them off lets go of them. */
   followed: Walker | null = null
   private lately: Ended[] = []
@@ -478,6 +527,14 @@ export class Walkers {
     for (const one of [w, this.otherOfTwo(w)]) if (one) one.kept = kept
   }
 
+  /**
+   * The Places the pavements of the Tile `tile` reach, each by a way round all that stands there: those its Walkers go
+   * to, as the scene check asks of a shed's door (#291).
+   */
+  reached(tile: Bounds): Place[] {
+    return this.pavements.filter((p) => sameBounds(p.tile, tile)).flatMap((p) => p.ways.map((way) => way.place))
+  }
+
   /** Every Walker, in the order their Tiles were added, and each of a two after the one they walk beside. */
   get all(): readonly Walker[] {
     return this.walkers
@@ -489,8 +546,51 @@ export class Walkers {
   }
 
   /**
+   * What `w` is doing now, in a few words, as the note of a Walker the player Follows says it: at a door, whose it is,
+   * if it is anyone's own (#291), theirs or another's.
+   */
+  doingNow(w: Walker): string {
+    const door = w.way?.place.kind === 'door' ? w.way.place : undefined
+    const host = door && (w.own?.door === door ? w : this.walkers.find((o) => o.own?.door === door))
+    const says = host && (host === w ? OWN[host.own!.kind] : OWN[host.own!.kind].visit(host.name))
+    if (says && w.doing === 'stroll' && !w.crossing) return says.heading
+    if (says && w.doing === 'act') return says.inside
+    const place = w.way?.place
+    const bench = place?.kind === 'bench'
+    switch (w.doing) {
+      case 'stroll':
+        return w.crossing
+          ? 'heading for the crossing'
+          : !place
+            ? 'out for a stroll'
+            : bench
+              ? 'heading for a bench'
+              : place.kind === 'door'
+                ? 'on an errand'
+                : 'heading for a terrace'
+      case 'stop':
+        return w.side ? 'stopped for a chat' : 'looking in a window'
+      case 'go':
+        return bench ? 'sitting down on a bench' : 'going indoors'
+      case 'act':
+        return bench ? 'resting on a bench' : place?.kind === 'door' ? 'indoors' : 'on the way up'
+      case 'up':
+        return place?.kind === 'terrace' && place.up.sit ? 'sitting out on a terrace' : 'out on a terrace'
+      case 'down':
+        return 'on the way down'
+      case 'back':
+        return bench ? 'getting up from the bench' : 'coming back out'
+      case 'wait':
+        return 'waiting to cross'
+      case 'cross':
+        return 'crossing the road'
+    }
+  }
+
+  /**
    * Walkers on `pavements`, the centre lines of the pavements of the Tile `tile`, each a loop of points round its
-   * Block, the ways to the `places` on them round `obstacles` (see {@link refit}), and the `zebras` between them.
+   * Block, the ways to the `places` on them round `obstacles` (see {@link refit}), and the `zebras` between them; a
+   * door on it is `own` to a Walker who has one of their own there (#291), and with none given, a door is nobody's.
    */
   add(
     tile: Bounds,
@@ -498,29 +598,38 @@ export class Walkers {
     places: readonly Place[] = [],
     obstacles: readonly (readonly Vec[])[] = [],
     zebras: readonly Zebra[] = [],
+    own?: Own,
   ) {
     const lines = pavements.map((loop) => polyline([...loop, loop[0]]))
     const ends = endsOf(lines, zebras)
     for (const [i, loop] of pavements.entries()) {
       const seeds = mulberry32(pavementSeed(this.seed, loop))
       const line = lines[i]
-      this.pavements.push({ tile, loop, line, ways: waysOf(line, loop, places, obstacles), zebras: ends.get(line)! })
+      const pavement = { tile, loop, line, ways: waysOf(line, loop, places, obstacles), zebras: ends.get(line)!, walkers: [] as Walker[] }
+      this.pavements.push(pavement)
       for (let k = Math.max(2, Math.round(line.length / SPACING)); k > 0; k--) {
         const two = seeds() < TWOS
         const lead = walker((seeds() * 4294967296) >>> 0, tile, line, two ? -PAIR : 0)
-        this.walkers.push(lead)
-        if (two) this.walkers.push(walker((seeds() * 4294967296) >>> 0, tile, line, PAIR, lead))
+        pavement.walkers.push(lead)
+        if (two) pavement.walkers.push(walker((seeds() * 4294967296) >>> 0, tile, line, PAIR, lead))
       }
+      for (const w of pavement.walkers) drawOwn(w, pavement.ways, own)
+      this.walkers.push(...pavement.walkers)
     }
   }
 
   /**
    * The Places of the Tile `tile` as it now stands, `places`, and `obstacles`, the outlines on the map of all that
-   * stands at a Walker's height on it, after a Stage-up or a Rezoning. Its Walkers bound for a Place go back to their
-   * pavement and choose again.
+   * stands at a Walker's height on it, after a Stage-up or a Rezoning, and what a door on it is to a Walker who has one
+   * of their own, `own` (see {@link add}): each has their door again from those there are now. Its Walkers bound for a
+   * Place go back to their pavement and choose again.
    */
-  refit(tile: Bounds, places: readonly Place[], obstacles: readonly (readonly Vec[])[]) {
-    for (const p of this.pavements) if (sameBounds(p.tile, tile)) p.ways = waysOf(p.line, p.loop, places, obstacles)
+  refit(tile: Bounds, places: readonly Place[], obstacles: readonly (readonly Vec[])[], own?: Own) {
+    for (const p of this.pavements) {
+      if (!sameBounds(p.tile, tile)) continue
+      p.ways = waysOf(p.line, p.loop, places, obstacles)
+      for (const w of p.walkers) drawOwn(w, p.ways, own)
+    }
     for (const w of this.walkers) {
       if (!sameBounds(w.tile, tile) || !w.way) continue
       if (w.path) w.s = w.way.s
@@ -571,6 +680,7 @@ export class Walkers {
         (!s.kinds || s.kinds.includes(w.kind)) &&
         (s.pair === undefined || s.pair === (w.side !== 0)) &&
         (!s.when || s.when.includes(now)) &&
+        (!s.needs || s.needs === w.own?.kind) &&
         s.title !== last &&
         this.canDo(
           w,
@@ -587,15 +697,17 @@ export class Walkers {
   }
 
   /**
-   * Whether `w` can do `steps` in turn from the pavement `line`: each Place there, that a two side by side fit the
-   * way to if they walk in one, and across the Road at a Signal, the steps after it on the far pavement.
+   * Whether `w` can do `steps` in turn from the pavement `line`: each Place there, their own door among them, that a two
+   * side by side fit the way to if they walk in one, and across the Road at a Signal, the steps after it on the far
+   * pavement.
    */
   private canDo(w: Walker, line: Polyline, steps: readonly Step[], leftToCross: LeftToCross): boolean {
     const pavement = this.pavements.find((p) => p.line === line)
     for (const [i, step] of steps.entries()) {
       if (step === 'cross')
         return !!pavement?.zebras.some((z) => leftToCross(z.junction) !== undefined && this.canDo(w, z.to, steps.slice(i + 1), leftToCross))
-      if (step !== 'stop' && !pavement?.ways.some((way) => way.place.kind === step && (way.two || !w.side))) return false
+      if (step === 'home' && !this.wayHome(w, line)) return false
+      if (step !== 'stop' && step !== 'home' && !pavement?.ways.some((way) => way.place.kind === step && (way.two || !w.side))) return false
     }
     return true
   }
@@ -612,7 +724,7 @@ export class Walkers {
       // At a crossing whose far pavement has what the beats after it need.
       if (!this.crossAt(w, leftToCross, (to) => this.canDo(w, to, after, leftToCross))) return this.breakOff(w)
     } else {
-      const ways = this.nearest(w, step)
+      const ways = step === 'home' ? [this.wayHome(w)].filter((way) => way !== undefined) : this.nearest(w, step)
       if (!ways.length) return this.breakOff(w)
       w.way = ways[Math.floor(roll(w) * ways.length)]
       headFor(w, w.way.s)
@@ -673,6 +785,15 @@ export class Walkers {
       .slice(0, 3)
   }
 
+  /**
+   * The way from the pavement `line`, theirs unless told, to `w`'s own door (#291), if it reaches it: a way a two fit,
+   * in a two.
+   */
+  private wayHome(w: Walker, line = w.line) {
+    const door = w.own?.door
+    return door && this.pavements.find((p) => p.line === line)?.ways.find((way) => way.place === door && (way.two || !w.side))
+  }
+
   /** `w`'s next `dt` seconds, `simDt` of the Sim's. */
   private live(w: Walker, dt: number, simDt: number, leftToCross: LeftToCross) {
     const pace = Math.abs(w.speed) * dt
@@ -718,8 +839,10 @@ export class Walkers {
         if ((w.along += pace) < w.path!.length) break
         w.along = w.path!.length
         w.doing = 'act'
-        const { kind } = w.way!.place
-        w.time = kind === 'door' ? 6 + roll(w) * 8 : kind === 'bench' ? 10 + roll(w) * 14 : stairs(w)
+        const { place } = w.way!
+        // At their own door, they stay longer than a visitor would (#291).
+        const visit = place === w.own?.door ? 14 + roll(w) * 26 : 6 + roll(w) * 8
+        w.time = place.kind === 'door' ? visit : place.kind === 'bench' ? 10 + roll(w) * 14 : stairs(w)
         break
       }
       case 'act':
@@ -741,12 +864,19 @@ export class Walkers {
   }
 
   /**
-   * What `w` does next, strolling: their Storylet's next beat, if they are in one they can go on with. Or stop, go in
-   * at a door, sit on a bench, cross the Road at a Signal, or stroll on. Where their pavement reaches a terrace, half
-   * the doors they would go in at are a terrace's instead (#293), so that elsewhere nothing changes.
+   * What `w` does next, strolling: their Storylet's next beat, if they are in one they can go on with. Or go in at their
+   * own door (#291), if they have one on the pavement they walk. Or stop, go in at a door, sit on a bench, cross the
+   * Road at a Signal, or stroll on. Where their pavement reaches a terrace, half the doors they would go in at are a
+   * terrace's instead (#293), so that elsewhere nothing changes.
    */
   private choose(w: Walker, leftToCross: LeftToCross) {
     if (w.storylet && this.beat(w, leftToCross)) return
+    const home = this.wayHome(w)
+    if (home && roll(w) < HOME) {
+      w.way = home
+      headFor(w, home.s)
+      return
+    }
     const r = roll(w)
     if (r >= 0.8) {
       if (r >= 0.95 || !this.crossAt(w, leftToCross)) w.time = strolling(w)

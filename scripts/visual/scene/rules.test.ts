@@ -13,6 +13,7 @@ import {
   neighbours,
   pathsClear,
   scenes,
+  shedDoors,
   wheels,
 } from './rules'
 
@@ -79,6 +80,7 @@ function report(things: Thing[], more: Partial<Report> = {}): Report {
     moving: { '0,0': 1 },
     colours: {},
     vehicles: [],
+    doors: [],
     blockZoomHidden: true,
     triangles: 0,
     meshes: 0,
@@ -206,6 +208,23 @@ describe('scenes', () => {
 describe('moves', () => {
   it('fails a Tile at Stage 2 where nothing moves', () => {
     expect(moves(report([], { stage: 2, moving: {} })).map((f) => f.tile)).toEqual(['0,0'])
+  })
+})
+
+describe('shed-doors', () => {
+  const shed: Lot = { tile: '0,0', block: 0, index: 0, box: { x0: -10, y0: -10, x1: 10, y1: 0 }, form: 'shed' }
+  const door = (reached: boolean, lot = 0) => ({ tile: '0,0', block: 0, lot, at: { x: 0, y: 0.6 }, reached })
+
+  it('fails a shed with no door, and one whose door no Walker reaches', () => {
+    expect(shedDoors(report([], { lots: [shed], doors: [door(true, 1)] })).map((f) => f.what)).toEqual(['shed at (0, -5) has no door'])
+    expect(shedDoors(report([], { lots: [shed], doors: [door(false)] })).map((f) => f.what)).toEqual([
+      'no Walker reaches the shed door at (0, 1)',
+    ])
+  })
+
+  it('passes a shed whose door a Walker reaches, and asks nothing of another building', () => {
+    expect(shedDoors(report([], { lots: [shed], doors: [door(true)] }))).toEqual([])
+    expect(shedDoors(report([], { lots: [{ ...shed, form: 'house' }] }))).toEqual([])
   })
 })
 

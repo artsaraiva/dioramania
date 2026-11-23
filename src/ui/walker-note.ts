@@ -1,5 +1,5 @@
 import type { View } from '../render/view'
-import { doingNow, type Walker } from '../walkers/walkers'
+import { homeOf, jobOf, type Walker } from '../walkers/walkers'
 import { whenChanged } from './readings'
 import './walker-note.css'
 
@@ -27,7 +27,8 @@ export function emptyItem(text: string) {
 /**
  * The note of the Walker the player Follows (#289): a paper note in the left slot (`./screen.css`), after the
  * Junction's, which a Walker followed never shares the slot with. It gives their name and what they do, who they are
- * with, their home and their traits, what they are doing now, and their log (#290): the lines of their Storylets so
+ * with, their home and their traits (a door of their own among them, #291), what they are doing now (at a door, whose
+ * it is), and their log (#290): the lines of their Storylets so
  * far, the newest first, scrolling. "Keep" Keeps them and the other of their two, so that their Storylets go on
  * unwatched, and "Let go" no longer does; "Stop following" lets go as `Esc` does. A click on a Walker follows them (`./tools`), and moving the
  * camera by hand lets go (`camera.hold`): the note follows the view.
@@ -92,11 +93,11 @@ export function createWalkerNote(note: HTMLElement, view: View) {
       if (!walker) return
       show.following(walker.kept ? 'Following · Kept' : 'Following')
       show.name(walker.name)
-      show.job(walker.job)
+      show.job(jobOf(walker))
       show.with(view.otherOfTwo(walker)?.name ?? 'on their own')
-      show.home(walker.home)
+      show.home(homeOf(walker))
       show.traits(walker.traits.join(', '))
-      show.now(doingNow(walker))
+      show.now(view.doingNow(walker))
       show.keep(walker.kept ? 'Let go' : 'Keep')
       showLog(walker)
     },

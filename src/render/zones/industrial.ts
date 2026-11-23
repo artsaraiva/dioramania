@@ -1,11 +1,27 @@
 import * as THREE from 'three'
 import { mulberry32 } from '../../sim/demand'
-import { middle, polyline, type Bounds } from '../../sim/geometry'
+import { middle, polyline, type Bounds, type Vec } from '../../sim/geometry'
 import { KERB } from '../blocks'
 import { type Kit, type Look as KitLook, PLANT, SHAPES, spot, to } from '../kit'
 import { TROLLEY } from '../movers'
 import { PATTERN } from '../pattern'
-import { corners, fit, lotsOf, near, overlap, runs, stands, turned, type Look, type RowLot, type Run, type ZoneGround } from './ground'
+import { inside } from '../field'
+import { INSET } from '../walkers'
+import {
+  corners,
+  fit,
+  lotsOf,
+  near,
+  onDrive,
+  overlap,
+  runs,
+  stands,
+  turned,
+  type Look,
+  type RowLot,
+  type Run,
+  type ZoneGround,
+} from './ground'
 import { alongEdge, clearOfKerbside, clearOfScenes, placeScenes, sceneOrder, smaller, type Scene } from './scenes'
 import { sawtooth } from '../shapes'
 
@@ -185,6 +201,7 @@ function industrial(g: ZoneGround) {
   /** The ground taken on the Block so far: the lamps at its corners, the sheds and their yards' details. */
   const taken: RowLot[] = g.lamps.map(({ x, y }) => ({ x, y, w: 1.4, d: 1.4, ry: 0, onRoad: false }))
   const laid: { shed: Shed; lot: number }[] = []
+  const ways: RowLot[] = [] // from each shed's door for people out to the pavement
   for (const [i, f] of whole.entries()) {
     if (!f) continue
     const along = f.w >= f.d
@@ -203,8 +220,15 @@ function industrial(g: ZoneGround) {
     taken.push(footprint(shed))
     kit.stand(shed.x, shed.y, shed.w, shed.d)
     kit.lot(i, f)
+    // Its door for people (#291), and its way out to the pavement, which nothing after it on the Block stands on: held
+    // as a piece's ground, which the kerbside keeps a planter's length off as a door's step is not.
+    const door = peopleDoor(g, shed, [...whole.filter((o): o is RowLot => o !== null && o !== f), ...taken])
+    for (const l of door?.way ?? []) {
+      ways.push(l)
+      kit.stand(l.x, l.y, l.w, l.d, l.ry)
+    }
     const first = chimney
-    kit.staged((stage) => warehouse(kit, shed.x, shed.y, KERB, shed.w, shed.d, first, side, stage))
+    kit.staged((stage) => warehouse(kit, shed.x, shed.y, KERB, shed.w, shed.d, first, side, stage, door))
     chimney = false
   }
   // Each shed's yard, and the Block's scenes on ground left along its edge (#181), on a stream of their own.
@@ -212,7 +236,7 @@ function industrial(g: ZoneGround) {
   const yards = sheds.map((s) => yardOf(g, s, sheds))
   const centre = middle(g.block)
   kit.lot(-1)
-  for (const { kind, ground: l, from } of sceneGrounds(g, mulberry32(spot(centre.x, centre.y) ^ 0x1d57), sheds, yards)) {
+  for (const { kind, ground: l, from } of sceneGrounds(g, mulberry32(spot(centre.x, centre.y) ^ 0x1d57), sheds, yards, ways)) {
     taken.push(l)
     kit.stand(l.x, l.y, l.w, l.d, l.ry, from)
     kit.scene(kind, () => kit.staged((stage) => stage >= from && SCENES[kind](kit, l, stage), spot(l.x, l.y)))
@@ -223,7 +247,7 @@ function industrial(g: ZoneGround) {
     loadingYard(g, shed, taken, yards[k])
   }
   kit.lot(-1)
-  fence(g, yards)
+  fence(g, yards, ways)
 }
 
 /**
@@ -231,14 +255,22 @@ function industrial(g: ZoneGround) {
  * their yards are laid: one from Stage 2, and a second of another kind at Stage 3 on a Block of 2,500 m² or more,
  * away from the first. Each lies along a straight run of the Block's edge facing a Road (or any, on a Block with none),
  * as long and deep as there is room for between the edge and the sheds, clear of every shed and off every yard of
- * `yards`, the lamps, the utility poles and the street trees; a kind that finds no ground gives way to another.
+ * `yards` and every way out from a shed's door of `ways` (#291), the lamps, the utility poles and the street trees; a
+ * kind that finds no ground gives way to another.
  */
-function sceneGrounds(g: ZoneGround, draw: () => number, sheds: Shed[], yards: (RowLot | null)[]): Scene<IndustrialScene>[] {
+function sceneGrounds(
+  g: ZoneGround,
+  draw: () => number,
+  sheds: Shed[],
+  yards: (RowLot | null)[],
+  ways: RowLot[],
+): Scene<IndustrialScene>[] {
   const { scenes: kinds, second, ground, sizes } = INDUSTRIAL_FINISH
   const all = runs(g, ground.in)
   const blocked = [
     ...sheds.map((s) => ({ ...footprint(s), w: s.w + 2 * ground.shedRoom, d: s.d + 2 * ground.shedRoom })),
     ...yards.filter((y) => y !== null),
+    ...ways,
   ]
   const ok = (out: Scene<IndustrialScene>[]) => (l: RowLot) =>
     clearOfScenes(out, l) && !blocked.some((b) => overlap(b, l)) && g.poles.every((p) => !near(l, p.x, p.y, ground.poleRoom))
@@ -694,11 +726,12 @@ type FenceStep = 'fence' | 'gate' | null
 
 /**
  * A fence along the Block's edge where it faces a Road (#181), `FENCE.in` m in from it: mesh panels between posts,
- * broken wherever anything claimed stands and by the kerbside's lamps, utility poles and street trees. Where
- * it breaks within a yard of `yards` for what stands there, the gap is a gate: taller posts either side, and its leaf
- * slid open behind the longer stretch of fence beside it. Each stretch is one brick, and claims its ground.
+ * broken wherever anything claimed stands, at the Drive and by the kerbside's lamps, utility poles and street trees. Where
+ * it breaks within a yard of `yards` for what stands there, or for a way out from a shed's door of `ways` (#291), the
+ * gap is a gate: taller posts either side, and its leaf slid open behind the longer stretch of fence beside it. Each
+ * stretch is one brick, and claims its ground.
  */
-function fence(g: ZoneGround, yards: (RowLot | null)[]) {
+function fence(g: ZoneGround, yards: (RowLot | null)[], ways: RowLot[]) {
   const { kit } = g
   const { step, least } = FENCE
   for (const run of runs(g, FENCE.in)) {
@@ -721,11 +754,13 @@ function fence(g: ZoneGround, yards: (RowLot | null)[]) {
         const lot = { x: p.x, y: p.y, w: step, d: 0.3, ry: run.ry, onRoad: true }
         const kind: FenceStep = !free
           ? null
-          : !claims.some((c) => overlap(c, lot, 0))
-            ? 'fence'
-            : yards.some((y) => y && near(y, p.x, p.y, 1))
-              ? 'gate'
-              : null
+          : ways.some((w) => overlap(w, lot, 0))
+            ? 'gate'
+            : !claims.some((c) => overlap(c, lot, 0)) && !onDrive(g, lot)
+              ? 'fence'
+              : yards.some((y) => y && near(y, p.x, p.y, 1))
+                ? 'gate'
+                : null
         const last = stretches[stretches.length - 1]
         if (last && last.kind === kind) last.s1 = s + step / 2
         else stretches.push({ kind, s0: s - step / 2, s1: s + step / 2 })
@@ -851,6 +886,108 @@ function shedDoors(w: number, d: number): number[] {
   return Array.from({ length: n }, (_, k) => -len / 2 + ((k + 0.5) * len) / n)
 }
 
+// A shed's door for people (#291): `wide` m wide and `tall` m tall in its frame of the band's white, `frame` m more
+// round it; and its way to the pavement (`../walkers`' `INSET` in from the kerb), `way` m wide: out from the door as
+// far as the spot a Walker comes up to it from (`step`, `../../walkers`' `waysOf`), then to the point of the pavement
+// nearest that spot, at most `reach` m off, as a Walker goes to a door that far in, and on toward the kerb to `kerb` m
+// in from it, so that the kerbside's furniture keeps off it (`../kerbside`'s `RUN.in` and a little). A way from the
+// roller doors' wall counts `busy` m longer, as the trucks and forklifts work there.
+const PEOPLE_DOOR = { wide: 1.1, tall: 2.2, frame: 0.12, way: 1.6, step: 1.6, kerb: 0.8, reach: 18, busy: 6 }
+
+/**
+ * A shed's door for people (#291): its middle on the wall at Stage 2 and 3, `(x, y)`, the way the wall faces (`ry`), how
+ * far back the wall stands at Stage 1 on its smaller footprint (`inset`), and its way to the pavement (`way`), a box
+ * out from the door and a box on to the pavement.
+ */
+interface PeopleDoor {
+  x: number
+  y: number
+  ry: number
+  inset: number
+  way: RowLot[]
+}
+
+/** The ground a way `wide` m wide takes from `a` to `b`, as a lot. */
+function wayLot(a: Vec, b: Vec, wide: number): RowLot {
+  const [dx, dy] = [b.x - a.x, b.y - a.y]
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, w: wide, d: Math.hypot(dx, dy), ry: Math.atan2(-dx, dy), onRoad: false }
+}
+
+/** The point of the loops `loops` nearest `p`. */
+function nearestOn(loops: Vec[][], p: Vec): Vec {
+  let [best, far] = [p, Infinity]
+  for (const loop of loops)
+    for (let i = 0; i < loop.length; i++) {
+      const [a, b] = [loop[i], loop[(i + 1) % loop.length]]
+      const [dx, dy] = [b.x - a.x, b.y - a.y]
+      const t = dx || dy ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy))) : 0
+      const q = { x: a.x + dx * t, y: a.y + dy * t }
+      const d = Math.hypot(q.x - p.x, q.y - p.y)
+      if (d < far) [best, far] = [q, d]
+    }
+  return best
+}
+
+/**
+ * Where shed `s` has its door for people (#291): on whichever wall it has the shortest way to the pavement, as a Walker
+ * walks it from the pavement's nearest point, a way from the roller doors' wall counting `PEOPLE_DOOR.busy` m longer, that stays
+ * off `others`, everything claimed and the kerbside's furniture. Along the wall, where it stands at every Stage and keeps
+ * off what the shed builds on that wall: the roller doors at every Stage, the pipes down the back and the office at its
+ * end, and the ladder up the end. Null if no wall has a way within `PEOPLE_DOOR.reach` m.
+ */
+function peopleDoor(g: ZoneGround, s: Shed, others: RowLot[]): PeopleDoor | null {
+  const { kit, field, block } = g
+  const { wide, way: across, step, kerb, reach, busy } = PEOPLE_DOOR
+  const [ux, uy] = [Math.cos(s.ry), Math.sin(s.ry)]
+  const pavements = field.outlines(INSET, [block]).filter((loop) => loop.length >= 4 && inside(block.loop, loop[0].x, loop[0].y))
+  // What `warehouse` builds on its walls: the roller doors at Stage 1 and after it, m along the doors' wall; and as long
+  // and deep as it is built from Stage 2, the pipes' drops and the office's end at the back, and the ladder's middle.
+  const rollers = [1, 0.8].flatMap((k) => shedDoors(s.w * k, s.d * k))
+  const [len, wid] = [s.len - 0.4, s.wid - 0.4]
+  const [pipes, office, ladder] = [[0.5, len / 2 - 1], -len / 2 + 0.2 + Math.min(11, len * 0.32), s.side * wid * 0.22]
+  const walls = [
+    ...[s.side, -s.side].map((k) => ({
+      k,
+      ry: s.ry + (k > 0 ? 0 : Math.PI),
+      at: turned(s.x, s.y, s.ry, 0, (k * s.wid) / 2),
+      half: s.len / 2,
+      inset: 0.1 * s.wid,
+    })),
+    ...[1, -1].map((e) => ({
+      k: 2 * e,
+      ry: s.ry - (e * Math.PI) / 2,
+      at: turned(s.x, s.y, s.ry, (e * s.len) / 2, 0),
+      half: s.wid / 2,
+      inset: 0.1 * s.len,
+    })),
+  ]
+  let [best, cost] = [null as PeopleDoor | null, Infinity]
+  for (const wall of walls) {
+    const most = wall.half * 0.8 - 1 // on the wall at Stage 1 too, clear of its corners
+    for (let a = -most; a <= most + 1e-9; a += 0.5) {
+      const p = turned(wall.at.x, wall.at.y, wall.ry, a, 0)
+      const [u, v] = [(p.x - s.x) * ux + (p.y - s.y) * uy, -(p.x - s.x) * uy + (p.y - s.y) * ux]
+      const within = (at: number, room: number) => Math.abs(at) < room
+      if (wall.k === s.side && rollers.some((r) => within(u - r, 1.8 + wide / 2 + 0.4))) continue
+      if (wall.k === -s.side && (pipes.some((q) => within(u - q, 1)) || u < office + 1)) continue
+      if (wall.k === -2 && within(v - ladder, 1.4)) continue
+      // Out to the spot before the step, then to the pavement where it is nearest, and on toward the kerb.
+      const front = turned(p.x, p.y, wall.ry, 0, step)
+      const to = nearestOn(pavements, front)
+      const far = Math.hypot(to.x - front.x, to.y - front.y)
+      const length = far + (wall.k === s.side ? busy : 0)
+      if (far > reach || length >= cost || !inside(block.loop, front.x, front.y)) continue
+      const on = far > 0.01 ? (INSET - kerb) / far : 0
+      const edge = { x: to.x + (to.x - front.x) * on, y: to.y + (to.y - front.y) * on }
+      const way = [wayLot(turned(p.x, p.y, wall.ry, 0, 0.2), front, across), ...(far > 0.01 ? [wayLot(front, edge, across)] : [])]
+      if (way.some((l) => others.some((o) => overlap(o, l)) || !kit.unclaimed(l.x, l.y, l.w, l.d, l.ry))) continue
+      if (!clearOfKerbside(g, [p, front, edge], [1.1, 1.3, 1.5])) continue
+      ;[best, cost] = [{ x: p.x, y: p.y, ry: wall.ry, inset: wall.inset, way }, length]
+    }
+  }
+  return best
+}
+
 // A shed to the Finish (#181): its company's colour, drawn from where it stands, for the band under its eaves; the band
 // `band` m deep; its roof's vents and ducting in galvanised steel against the roof, its pipes and ladder; the pool under
 // each door's lamp, `pool` m out and its size; and the chimney's amber beacon.
@@ -876,9 +1013,20 @@ const SHED_FINISH = {
  * its company's colour under the eaves, and a roof of ribbed steel sheet. With the Stage, its glazing lights from
  * Stage 2 where only half the sheds' did at Stage 1; from Stage 2 a row of vents down each tooth, a pipe run along its
  * back, a ladder up one end, a pool under each door's lamp and an amber beacon on the chimney; at Stage 3 a duct along
- * the roof.
+ * the roof. And at every Stage, its `door` for people (#291), if it has one, where a Walker goes in.
  */
-function warehouse(kit: Kit, x: number, y: number, h: number, w: number, d: number, chimney: boolean, side: number, stage = 2) {
+function warehouse(
+  kit: Kit,
+  x: number,
+  y: number,
+  h: number,
+  w: number,
+  d: number,
+  chimney: boolean,
+  side: number,
+  stage = 2,
+  door: PeopleDoor | null = null,
+) {
   kit.formed('shed')
   const [tall, walls, roofs, lit, doorColour, chimneyTall] = [
     kit.rand(),
@@ -988,6 +1136,14 @@ function warehouse(kit: Kit, x: number, y: number, h: number, w: number, d: numb
     if (stage === 3) kit.add(CYLINDER, SHED.band, cx, cy, h + high - 6, 0, 1.06, 0.6, 1.06)
     kit.smoke(cx, cy, h + high + 0.4)
     kit.beacon(cx + 0.8, cy, h + high + 0.2, 0.3, 'amber')
+  }
+  if (door) {
+    // In its frame, on the wall as it stands at the Stage: back on Stage 1's smaller footprint.
+    const { wide, tall, frame } = PEOPLE_DOOR
+    const [dx, dy] = to(door.x, door.y, door.ry, 0, stage === 1 ? -door.inset : 0)
+    kit.local(kit.cuboid(wide + 2 * frame, tall + frame, 0.06), SHED.band, dx, dy, door.ry, 0, 0.03, h)
+    kit.local(kit.cuboid(wide, tall, 0.12), doorColour, dx, dy, door.ry, 0, 0.06, h)
+    kit.doorway(dx, dy, door.ry, wide)
   }
   kit.shadow(x, y, h, w * 1.3 + 2, d * 1.3 + 2)
   kit.brick('building', x, y, h)

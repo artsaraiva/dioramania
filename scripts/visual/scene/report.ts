@@ -96,6 +96,15 @@ export interface Lot {
   ground?: Hull
 }
 
+/** A door's step at ground level (#291), on the lot of the building it is in, and whether a Walker's way reaches it. */
+export interface Door {
+  tile: string
+  block: number
+  lot: number
+  at: Pt
+  reached: boolean
+}
+
 /** Something that moves on its own along a path on the ground (or a wall, or in the air). */
 export interface Mover {
   kind: string
@@ -202,6 +211,8 @@ export interface Report {
   /** Each colour painted on the scenery (hex), with the triangles that wear it. */
   colours: Record<string, number>
   vehicles: Vehicle[]
+  /** The doors a Walker could go in at (#291). */
+  doors: Door[]
   /** Whether the Block-zoom props' material hides itself with the whole City in frame (zoom 1, under City zoom's). */
   blockZoomHidden: boolean
   /** The static scenery's triangles and meshes (one draw call each, before the shadow pass). */

@@ -180,7 +180,7 @@ _Avoid_: Congestion, traffic, gridlock
 ### People
 
 **Walker**:
-A person of the City, on foot, with a name, a home, something they do and a log of their Storylets: always the same person in the same City, and a driver out of their car is one. Walkers stay on the pavements and at the Places off them, and cross a Road only at a Signal of their own Tile, in the Walk phase traffic stops for, to walk the pavement they reach.
+A person of the City, on foot, with a name, a home, something they do and a log of their Storylets: always the same person in the same City, and a driver out of their car is one. On a Tile of homes, shops or plants, many have a door of their own there: their home, a shop they keep or the plant they work at. Walkers stay on the pavements and at the Places off them, and cross a Road only at a Signal of their own Tile, in the Walk phase traffic stops for, to walk the pavement they reach.
 _Avoid_: Pedestrian, person, peg, citizen, character, NPC
 
 **Place**:
