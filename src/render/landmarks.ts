@@ -102,11 +102,12 @@ const TIER_WINDOWS = { bay: 3, storey: 3 }
 
 /**
  * The tower landmark on Block `block`, as one brick: stacked cylinders in coral and cream with two glazed decks and a
- * beacon, on a podium. A fountain stands north of it and sakura around it, wherever the Block's pavement reaches.
+ * beacon, on a podium. A fountain stands north of it and sakura around it, wherever the Block's pavement reaches and,
+ * for a sakura, off the Block's Drive (#327), which `onDrive` reads.
  * To the Finish (#189): where the kit builds patterned, every tier wears plaster and a framed window in every bay of
  * every storey round it, lit at night as the windows are, and each deck's roof wears pavers.
  */
-export function tower(kit: Kit, field: Field, block: Block, x: number, y: number) {
+export function tower(kit: Kit, field: Field, block: Block, x: number, y: number, onDrive = (_: Vec) => false) {
   const base = KERB + 1.4
   const seed = spot(x, y) // which windows light, a draw for each tier and each deck
   kit.add(kit.box(20, 1.4, 20, 2.4, 0.32), '#e2d8c6', x, y, KERB)
@@ -127,7 +128,12 @@ export function tower(kit: Kit, field: Field, block: Block, x: number, y: number
   const on = (px: number, py: number, clear: number) => field.sample(px, py) >= clear && inside(block.loop, px, py)
   if (on(x, y + 20.8, 6)) fountain(kit, x, y + 20.8)
   for (const dx of [-14.4, 16.4]) {
-    for (const dy of [24.4, 4, -16.4]) if (on(x + dx, y + dy, 1.5)) kit.tree(x + dx, y + dy, KERB, 0.8, 'sakura')
+    for (const dy of [24.4, 4, -16.4]) {
+      if (!on(x + dx, y + dy, 1.5)) continue
+      // One on the Drive is drawn as it would be and left off, so that nothing drawn after it changes.
+      const left = onDrive({ x: x + dx, y: y + dy })
+      kit.muted(() => kit.tree(x + dx, y + dy, KERB, 0.8, 'sakura'), left)
+    }
   }
 }
 
