@@ -1,13 +1,14 @@
 import { extent, type Bounds, type Vec } from '../sim/geometry'
 import type { Network } from '../sim/network'
 import type { NetworkSpec } from '../sim/spec'
+import { FOOTPATH } from './blocks'
 
 const CELL = 1.25 // m between samples
 // The field is exact up to this far from a lane's edge and flat beyond it, so each lane segment only touches the
 // samples around it. Raise it when something needs an outline further in than this (a deep lawn inset, say).
 const REACH = 8
 const HALF_CAR = 1.6 // half a car's width plus a little clearance
-const INSET = 2 // m of bare road plate between a Block and the slab's edge
+const INSET = FOOTPATH // m between a Block and the slab's edge, which its pavement paves as its half of a Footpath (#362)
 const MIN_AREA = 30 // m²: an outline enclosing less than this is a sliver, not a Block
 const GROW = 200 // m of room the grid takes beyond a piece laid outside it, so that not every Tile re-cuts it
 

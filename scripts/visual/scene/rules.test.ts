@@ -7,6 +7,8 @@ import {
   blankWalls,
   colours,
   emptyPavement,
+  footpathEdge,
+  footpathKerb,
   insideBlock,
   keepsClear,
   moves,
@@ -81,6 +83,9 @@ function report(things: Thing[], more: Partial<Report> = {}): Report {
     colours: {},
     vehicles: [],
     doors: [],
+    footpathEdges: [],
+    pavements: [],
+    kerbs: [],
     blockZoomHidden: true,
     triangles: 0,
     meshes: 0,
@@ -366,5 +371,77 @@ describe('blank-roof', () => {
 
   it('passes a roof all but hidden under the storey on it, as a podium under its tower is', () => {
     expect(blankRoofs(report(house, { roofs: [roof(4, 6, 8, 6, { seen: 8 })] }))).toEqual([])
+  })
+})
+
+/** A Block's pavement top over the box `x0`–`x1` by `y0`–`y1`, as two triangles. */
+const top = (x0: number, y0: number, x1: number, y1: number): Pt[][] => [
+  [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+  ],
+  [
+    { x: x0, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+  ],
+]
+
+/** The north edge of Tile 0,0 over the Block, 2 m beyond it, where no Road crosses: a Footpath's half. */
+const NORTH = { tile: '0,0', from: { x: -20, y: 22 }, to: { x: 20, y: 22 } }
+
+describe('footpath-edge', () => {
+  it('fails pavement that stops short of the Tile’s edge where no Road crosses it, by how much of the edge it leaves', () => {
+    const r = report([], { footpathEdges: [NORTH], pavements: [{ tile: '0,0', block: 0, top: top(-20, -20, 20, 19.76) }] })
+    expect(footpathEdge(r).map((f) => [f.tile, f.what, f.by])).toEqual([
+      ['0,0', 'pavement stops short of the Tile’s edge toward (20, 22)', '40 m'],
+    ])
+  })
+
+  it('passes pavement that reaches the edge', () => {
+    expect(
+      footpathEdge(report([], { footpathEdges: [NORTH], pavements: [{ tile: '0,0', block: 0, top: top(-20, -20, 20, 22) }] })),
+    ).toEqual([])
+  })
+})
+
+describe('footpath-kerb', () => {
+  const mark = (what: 'kerbstone' | 'grate' | 'bollard', x: number, y: number) => ({ what, tile: '0,0', block: 0, at: { x, y } })
+
+  it('fails a kerbstone, a drain grate or a bollard on a Footpath side, saying how far in from the edge', () => {
+    const r = report([], {
+      footpathEdges: [NORTH],
+      kerbs: [mark('kerbstone', 0, 19.6), mark('grate', 5, 19.56), mark('bollard', -8, 19.05)],
+    })
+    expect(footpathKerb(r).map((f) => [f.what, f.by])).toEqual([
+      ['kerbstone on a Footpath side at (0, 20)', '2.40 m in'],
+      ['grate on a Footpath side at (5, 20)', '2.44 m in'],
+      ['bollard on a Footpath side at (-8, 19)', '2.95 m in'],
+    ])
+  })
+
+  it('passes the kerb of a Road that runs on to the edge past the Footpath’s mouth, and kerbs away from it', () => {
+    const r = report([], {
+      footpathEdges: [NORTH],
+      kerbs: [mark('kerbstone', -19.5, 21.5), mark('grate', 19.56, 18), mark('kerbstone', 0, 10)],
+    })
+    expect(footpathKerb(r)).toEqual([])
+  })
+})
+
+describe('empty-pavement on a Footpath side', () => {
+  const side = (y: number) => [Array.from({ length: 41 }, (_, i) => ({ x: -20 + i, y }))]
+
+  it('fails 12 m of a Footpath side with nothing standing along it, as it fails a kerb', () => {
+    const block = { ...BLOCK, kerb: side(-20), footpath: side(20) }
+    const r = report([thing('shop', 0, -18, 40, 2)], { blocks: [block] })
+    expect(emptyPavement(r).map((f) => [f.what, f.by])).toEqual([['pavement empty on a Footpath side toward (20, 20)', '41 m']])
+  })
+
+  it('passes a Footpath side with something standing every few metres', () => {
+    const block = { ...BLOCK, kerb: side(-20), footpath: side(20) }
+    const planters = [-15, -5, 5, 15].map((x) => thing('planter', x, 19, 1.8, 0.6))
+    expect(emptyPavement(report([thing('shop', 0, -18, 40, 2), ...planters], { blocks: [block] }))).toEqual([])
   })
 })

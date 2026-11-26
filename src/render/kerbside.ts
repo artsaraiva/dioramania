@@ -3,7 +3,7 @@ import { mulberry32 } from '../sim/demand'
 import { pointAt, type Bounds, type Polyline, type Vec } from '../sim/geometry'
 import type { Network } from '../sim/network'
 import type { NetworkSpec } from '../sim/spec'
-import { KERB, twiceArea, type Block } from './blocks'
+import { byEdge, KERB, paved, tileOf, twiceArea, type Block } from './blocks'
 import { inside, type Field } from './field'
 import { SHAPES, spot, to, type Kit } from './kit'
 import { moverWidth, type MoverKind } from './movers'
@@ -201,17 +201,46 @@ export function walk(loop: Vec[]) {
 }
 
 /**
- * The kerbstone line along Block `block`'s edge, as one brick: a ribbon on the pavement just in from its bevel. Every
- * Block has one (#176), a roundabout's island and a narrow Block's bike lane too.
+ * The kerbstone line along Block `block`'s kerb, as one brick: a ribbon on the pavement just in from its bevel. Every
+ * Block has one (#176), a roundabout's island and a narrow Block's bike lane too. It runs along the pavement's outline
+ * (`paved`) but where that lies along the Tile's edge, the Block's half of a Footpath, which has no kerb; so along a Road
+ * it runs on past the Footpath's mouth, square to the Tile's edge, where the next Tile's line carries on (#362).
  */
-export function kerbLine(kit: Kit, { loop }: Block) {
+export function kerbLine(kit: Kit, block: Block) {
+  const tile = tileOf(block)
+  const loop = paved(block.loop, tile)
+  const n = loop.length
   const { inward } = walk(loop)
+  const turn = twiceArea(loop) > 0 ? 1 : -1
+  /** Whether the piece of the outline from point `i` to point `j` lies along the Tile's edge, where `paved` put it. */
+  const alongTileEdge = (i: number, j: number) => {
+    const [a, b] = [loop[i], loop[j]]
+    return (a.x === b.x && (a.x === tile.x0 || a.x === tile.x1)) || (a.y === b.y && (a.y === tile.y0 || a.y === tile.y1))
+  }
   const pos: number[] = []
   const y = KERB + 0.008
-  const point = (i: number, o: number) => [loop[i].x + inward[i].x * o, y, -(loop[i].y + inward[i].y * o)]
-  for (let i = 0; i < loop.length; i++) {
-    const j = (i + 1) % loop.length
-    const [a, b, c, d] = [point(i, KERBSTONE.from), point(j, KERBSTONE.from), point(j, KERBSTONE.to), point(i, KERBSTONE.to)]
+  /**
+   * Point `i` moved `o` m in from the edge, for the piece of the kerb whose inward way is `way`. Where the kerb meets the
+   * Footpath's piece from `i` to `across`, it moves along the Tile's edge, so that the line ends square on it.
+   */
+  const point = (i: number, o: number, way: Vec, across: number | null) => {
+    if (across !== null) {
+      const [ex, ey] = [loop[across].x - loop[i].x, loop[across].y - loop[i].y]
+      const len = Math.hypot(ex, ey) || 1
+      const cos = (way.x * ex + way.y * ey) / len
+      if (cos > 0.2) return [loop[i].x + (ex / len) * (o / cos), y, -(loop[i].y + (ey / len) * (o / cos))]
+    }
+    return [loop[i].x + inward[i].x * o, y, -(loop[i].y + inward[i].y * o)]
+  }
+  for (let i = 0; i < n; i++) {
+    const [h, j, k] = [(i + n - 1) % n, (i + 1) % n, (i + 2) % n]
+    if (alongTileEdge(i, j)) continue
+    const [dx, dy] = [loop[j].x - loop[i].x, loop[j].y - loop[i].y]
+    const len = Math.hypot(dx, dy) || 1
+    const way = { x: (-dy / len) * turn, y: (dx / len) * turn }
+    const [from, to] = [alongTileEdge(h, i) ? h : null, alongTileEdge(j, k) ? k : null]
+    const [a, b] = [point(i, KERBSTONE.from, way, from), point(j, KERBSTONE.from, way, to)]
+    const [c, d] = [point(j, KERBSTONE.to, way, to), point(i, KERBSTONE.to, way, from)]
     // Both windings, so that it faces up whichever way the outline runs.
     pos.push(...a, ...b, ...c, ...a, ...c, ...d, ...a, ...c, ...b, ...a, ...d, ...c)
   }
@@ -221,7 +250,7 @@ export function kerbLine(kit: Kit, { loop }: Block) {
   const normal = g.attributes.normal
   for (let i = 0; i < normal.count; i++) if (normal.getY(i) < 0) normal.setXYZ(i, 0, 1, 0) // the underside faces up too: it lies flat
   kit.push(g, KERBSTONE.colour)
-  kit.brick('ground', loop[0].x, loop[0].y, KERB)
+  kit.brick('ground', block.loop[0].x, block.loop[0].y, KERB)
 }
 
 /** A flat slab `w` by `d` lying on the pavement at `(x, y)` turned `ry` (0 along x), `lift` m up. */
@@ -256,6 +285,31 @@ function bollards(kit: Kit, x: number, y: number, ry: number) {
   kit.brick('building', x, y, KERB)
 }
 
+/** A drain grate on the kerbstone line at `(x, y)`, along `ry`, as one brick. */
+function grate(kit: Kit, x: number, y: number, ry: number) {
+  slab(kit, GRATE.colour, x, y, 0.62, 0.3, ry, 0.012, 0.02)
+  kit.brick('ground', x, y, KERB)
+}
+
+/** What breaks a bare run of pavement, and the turn each takes as the walk goes round a Block. */
+type Break = 'planter' | 'bollards' | 'bench'
+const BREAKS: readonly Break[] = ['planter', 'bollards', 'bench']
+
+/**
+ * Break a bare run of pavement with `kind`: a planter or a bench at `q`, or a pair of bollards at `p`, along the edge
+ * `ry`. On a Footpath side, which takes nothing of a kerb (#362), what would be bollards is a planter or a bench, as where
+ * it stands draws. Returns where what stands.
+ */
+function breakRun(kit: Kit, kind: Break, footpath: boolean, p: Vec, q: Vec, ry: number): Vec[] {
+  const what = kind === 'bollards' && footpath ? (spot(q.x, q.y) % 2 ? 'planter' : 'bench') : kind
+  kit.furniture(() => {
+    if (what === 'planter') planter(kit, q.x, q.y, ry, 1.8)
+    else if (what === 'bollards') bollards(kit, p.x, p.y, ry)
+    else kit.bench(q.x, q.y, KERB, ry + Math.PI) // facing the road, or the Footpath
+  })
+  return what === 'bollards' ? pairAt(p.x, p.y, ry) : [q]
+}
+
 /** What a Block's street furniture keeps off besides what its Zone built: what stands at its corners and along its kerb. */
 export interface Kerbside {
   /** The lamps at its corners. */
@@ -283,6 +337,8 @@ export function dressKerbside(kit: Kit, block: Block, field: Field, net: Network
   const { lamps, trees, poles, stands, unpaved = Infinity } = kerbside
   const { loop } = block
   const { inward, along, length } = walk(loop)
+  const tile = tileOf(block)
+  const byTileEdge = loop.map((p) => byEdge(tile, p)) // along the Tile's edge, where nothing of a kerb stands (#362)
   const laneWidth = (road: string) => spec.roads[road]?.laneWidth ?? spec.roadDefaults.laneWidth
   const near = (p: Vec, q: Vec, d: number) => Math.hypot(p.x - q.x, p.y - q.y) < d
   const byPole = (p: Vec, d: number) => poles.some((q) => near(p, q, d))
@@ -410,31 +466,23 @@ export function dressKerbside(kit: Kit, block: Block, field: Field, net: Network
     if (
       unpaved >= KERBSTONE.to &&
       straight &&
+      !byTileEdge[i] &&
       grated > GRATE.every &&
       !corners.some((q) => near(p, q, RAIL.reach)) &&
       !pads.some((q) => near(p, q, 2.6)) &&
       !byPole(g, POLE_ROOM.grate)
     ) {
-      slab(kit, GRATE.colour, g.x, g.y, 0.62, 0.3, ry, 0.012, 0.02)
-      kit.brick('ground', g.x, g.y, KERB)
+      grate(kit, g.x, g.y, ry)
       grated = 0
     }
     bare = busy(p) || field.sample(p.x, p.y) < RUN.in - 0.2 ? 0 : bare + step
     if (bare >= RUN.most && straight && !onPad(p) && !low(p)) {
-      const q = at(i, RUN.in + 0.2)
-      const kind = breaks++ % 3
-      placed.push(...(kind === 1 ? pairAt(p.x, p.y, ry) : [q]))
-      kit.furniture(() => {
-        if (kind === 0) planter(kit, q.x, q.y, ry, 1.8)
-        else if (kind === 1) bollards(kit, p.x, p.y, ry)
-        else kit.bench(q.x, q.y, KERB, ry + Math.PI) // facing the road
-      })
+      placed.push(...breakRun(kit, BREAKS[breaks++ % 3], byTileEdge[i], p, at(i, RUN.in + 0.2), ry))
       bare = 0
     } else if (bare >= RUN.most + RUN.curve && !onPad(p)) {
       // Where the edge curves, as where a roundabout's arm flares into its ring, or a Zone's paving reaches it, a pair
       // of bollards, which neither crowds, once it has run bare a little further (#193).
-      placed.push(...pairAt(p.x, p.y, ry))
-      kit.furniture(() => bollards(kit, p.x, p.y, ry))
+      placed.push(...breakRun(kit, 'bollards', byTileEdge[i], p, at(i, RUN.in + 0.2), ry))
       bare = 0
     }
   }
@@ -446,7 +494,8 @@ export function dressKerbside(kit: Kit, block: Block, field: Field, net: Network
   // piece is metres long and one at least, broken by a bay at the kerb, the Zone's parts that stand on the ground, the
   // lamps, trees and poles, the rails' posts and the rest of the furniture. A run of more than `BARE.most` such points, the pieces at its
   // ends counted whole, takes a pair of bollards at its free point nearest its middle, at the walk's depth or else by
-  // the kerb, until none does.
+  // the kerb, until none does. Then the Block's Footpath side, which the check walks apart from its kerb (#362), the
+  // same way, but that its runs take a planter or a bench where the walk would stand one.
   // ponytail: a run with no free point is left bare, for the scene check to find; and `BARE` and the feet of `STANDS`
   // copy the check's numbers (`EMPTY`, `KERBSIDE`, `FOOT`, `FLAT`, `STEP`), so a change to those wants one here.
   const n = loop.length
@@ -471,29 +520,48 @@ export function dressKerbside(kit: Kit, block: Block, field: Field, net: Network
   }
   const kerb = loop.map((q) => lanes.some((l) => toLane(q, l) < BARE.road)) // where the edge faces a Road
   const fixtures = [...lampsAndTrees, ...poles, ...railPosts]
-  const broken = (i: number) => {
+  const footpathSide = loop.map((_, i) => !kerb[i] && byTileEdge[i])
+  /** Whether point `i` breaks a run of `side`, the kerb's points or the Footpath side's. */
+  const broken = (i: number, side: boolean[]) => {
     const q = loop[i]
     return (
-      !kerb[i] ||
+      !side[i] ||
       !kit.unclaimed(q.x, q.y, 1.9, 1.9, alongEdge(i), 0, AT_KERB) ||
       stands.feet(q.x, q.y, BARE.reach) ||
       [fixtures, placed].some((l) => l.some((s) => near(q, s, BARE.reach)))
     )
   }
+  /**
+   * Whether furniture standing `o` m in at `p` keeps clear: on the pavement, off the ground claimed, the lamps, trees,
+   * poles and rails' posts, and with each of its `feet` off a crossing's pads and `room` m off what stands tall.
+   */
+  const clear = (p: Vec, o: number, feet: Vec[], room: number) =>
+    field.sample(p.x, p.y) >= o - 0.2 &&
+    kit.unclaimed(p.x, p.y, 0, 0, 0, RUN.claimed) &&
+    !lampsAndTrees.some((q) => near(p, q, POLE_ROOM.furniture)) &&
+    !byPole(p, POLE_ROOM.furniture) &&
+    !railPosts.some((q) => near(p, q, BARE.rail)) &&
+    feet.every((b) => !onPad(b) && !stands(b.x, b.y, room, true))
+  /** Where a pair of bollards can break a run of the kerb at its point `i`: at the walk's depth, or else by the kerb. */
   const free = (i: number): Vec | null => {
     for (const o of [RUN.in, RAIL.in]) {
       const p = at(i, o)
-      if (
-        field.sample(p.x, p.y) >= o - 0.2 &&
-        kit.unclaimed(p.x, p.y, 0, 0, 0, RUN.claimed) &&
-        !lampsAndTrees.some((q) => near(p, q, POLE_ROOM.furniture)) &&
-        !byPole(p, POLE_ROOM.furniture) &&
-        !railPosts.some((q) => near(p, q, BARE.rail)) &&
-        pairAt(p.x, p.y, alongEdge(i)).every((b) => !onPad(b) && !stands(b.x, b.y, 0.1, true))
-      )
-        return p
+      if (clear(p, o, pairAt(p.x, p.y, alongEdge(i)), 0.1)) return p
     }
     return null
+  }
+  /**
+   * Where a planter or a bench can break a run of the Footpath side at its point `i`, as deep in as the walk stands one,
+   * its ends and its middle clear of what stands tall.
+   */
+  const seat = (i: number): Vec | null => {
+    const [o, ry] = [RUN.in + 0.2, alongEdge(i)]
+    const q = at(i, o)
+    const feet = [-0.9, 0, 0.9].map((d) => {
+      const [x, y] = to(q.x, q.y, ry, d, 0)
+      return { x, y }
+    })
+    return clear(q, o, feet, 0.3) ? q : null
   }
   /** The runs of points none of which is broken, in order round the loop, one that passes its start whole. */
   const bareRuns = (stops: boolean[]) => {
@@ -510,22 +578,27 @@ export function dressKerbside(kit: Kit, block: Block, field: Field, net: Network
   const points = (r: number[]) =>
     [...r, ...(r.length < n ? [(r[0] + n - 1) % n] : [])].reduce((sum, i) => sum + Math.max(1, Math.round(steps[i])), 0)
   const into = (r: number[], i: number) => (along[i] - along[r[0]] + length) % length // m along run `r` to its point `i`
-  for (let stops = loop.map((_, i) => broken(i)), more = true; more;) {
-    more = false
-    for (const run of bareRuns(stops)) {
-      if (points(run) <= BARE.most) continue
-      const span = into(run, run[run.length - 1])
-      const best = run
-        .map((i) => ({ i, p: free(i), off: Math.abs(into(run, i) - span / 2) }))
-        .filter((s) => s.p)
-        .sort((a, b) => a.off - b.off)[0]
-      if (!best) continue
-      const [p, ry] = [best.p!, alongEdge(best.i)]
-      placed.push(...pairAt(p.x, p.y, ry))
-      kit.furniture(() => bollards(kit, p.x, p.y, ry))
-      stops = loop.map((_, i) => broken(i))
-      more = true
-      break
+  // The kerb's points by a Road's corner can lie along the Tile's edge too: there, as on the Footpath side, a planter or
+  // a bench in place of the bollards.
+  for (const { side, find } of [
+    { side: kerb, find: (i: number) => (byTileEdge[i] ? seat(i) : free(i)) },
+    { side: footpathSide, find: seat },
+  ]) {
+    for (let stops = loop.map((_, i) => broken(i, side)), more = true; more;) {
+      more = false
+      for (const run of bareRuns(stops)) {
+        if (points(run) <= BARE.most) continue
+        const span = into(run, run[run.length - 1])
+        const best = run
+          .map((i) => ({ i, p: find(i), off: Math.abs(into(run, i) - span / 2) }))
+          .filter((s) => s.p)
+          .sort((a, b) => a.off - b.off)[0]
+        if (!best) continue
+        placed.push(...breakRun(kit, 'bollards', byTileEdge[best.i], best.p!, best.p!, alongEdge(best.i)))
+        stops = loop.map((_, i) => broken(i, side))
+        more = true
+        break
+      }
     }
   }
 }

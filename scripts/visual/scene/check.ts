@@ -80,6 +80,49 @@ function counts(r: Report) {
   console.log(`           movers ${tally(r.movers.map((m) => m.kind))}`)
 }
 
+/** What a Footpath side may add to, and so `moved` counts only when one of the ref's is gone (#362). */
+const ADDED = 'benches and planters'
+
+/**
+ * Where each building, lot, lamp, Drive, bench and planter of a City stands, by kind, to the centimetre: what no change to
+ * the pavement or the kerbside moves (#362). A building is a brick of the building kind on a lot its Zone gave a form; a
+ * lot is its ground as its Zone cut it.
+ */
+function placesOf(r: Report): Record<string, string[]> {
+  const cm = (p: { x: number; y: number }) => `${Math.round(p.x * 100)},${Math.round(p.y * 100)}`
+  const box = (b: Box) => `${cm({ x: b.x0, y: b.y0 })} ${cm({ x: b.x1, y: b.y1 })}`
+  const built = new Set(r.lots.flatMap((l) => (l.form ? [`${l.block}:${l.index}`] : [])))
+  return {
+    buildings: r.things.filter((t) => t.kind === 'building' && built.has(`${t.block}:${t.lot}`)).map((t) => `${t.block} ${box(t.box)}`),
+    lots: r.lots.flatMap((l) => (l.ground ? [`${l.block}:${l.index} ${l.ground.map(cm).join(' ')}`] : [])),
+    lamps: r.things.filter((t) => t.kind === 'lamp').map((t) => `${t.block} ${box(t.box)}`),
+    Drives: r.claims.filter((c) => c.kind === 'drive').map((c) => `${c.block} ${c.hull.map(cm).join(' ')}`),
+    [ADDED]: r.things.filter((t) => t.what === 'bench' || t.what === 'planter').map((t) => `${t.block} ${box(t.box)}`),
+  }
+}
+
+/**
+ * For each kind of `placesOf`: how many stand in `theirs` and not where they do in `ours`, or (but for `ADDED`) stand in
+ * `ours` where none does in `theirs`; how many `ours` has; and how many of them stand where none does in `theirs`.
+ */
+function moved(ours: Report, theirs: Report): Record<string, [number, number, number]> {
+  const [a, b] = [placesOf(ours), placesOf(theirs)]
+  return Object.fromEntries(
+    Object.entries(a).map(([kind, places]) => {
+      const left = new Map<string, number>()
+      for (const p of b[kind]) left.set(p, (left.get(p) ?? 0) + 1)
+      let extra = 0
+      for (const p of places) {
+        const n = left.get(p) ?? 0
+        if (n) left.set(p, n - 1)
+        else extra++
+      }
+      const gone = [...left.values()].reduce((sum, n) => sum + n, 0)
+      return [kind, [kind === ADDED ? gone : Math.max(gone, extra), places.length, extra]]
+    }),
+  )
+}
+
 /** Places printed of each of scenes, movers and things with --where: the first, one a Block. */
 const PLACES = 5
 
@@ -204,6 +247,24 @@ export async function main(o: Options): Promise<number> {
         console.log(
           `  mesh   Stage ${stage}: CHANGED from ${o.baseline!.label}, ${tris} against ${(b.triangles / 1e6).toFixed(2)} M and ${b.meshes}${rest}`,
         )
+      // Whether every building, lot, lamp, Drive, bench and planter stands where it does on the ref, over every seed
+      // swept (#362); a Footpath side may add benches and planters.
+      if (b) {
+        const sum: Record<string, number[]> = {}
+        for (const seed of seeds) {
+          const [ours, theirs] = [reports, base].map((rs) => rs.find((x) => x.stage === stage && x.seed === seed)!)
+          for (const [kind, counts] of Object.entries(moved(ours, theirs))) sum[kind] = counts.map((n, k) => n + (sum[kind]?.[k] ?? 0))
+        }
+        const off = Object.entries(sum).filter(([, [n]]) => n)
+        const added = sum[ADDED][2] ? ` (and ${sum[ADDED][2]} ${ADDED} more)` : ''
+        console.log(
+          off.length
+            ? `  places Stage ${stage}: MOVED from ${o.baseline!.label}: ${off.map(([kind, [n, of]]) => `${n} of ${of} ${kind}`).join(', ')}`
+            : `  places Stage ${stage}: ${Object.entries(sum)
+                .map(([kind, [, n, more]]) => `${n - (kind === ADDED ? more : 0)} ${kind}`)
+                .join(', ')} where ${o.baseline!.label} has them${added}`,
+        )
+      }
     }
     // What the sheets' seed built of each kind, and where.
     for (const r of reports.filter((x) => x.seed === seeds[0])) {

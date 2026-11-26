@@ -135,6 +135,30 @@ export interface Block {
    * known, and then its whole edge is taken for kerb.
    */
   kerb?: Pt[][]
+  /** Its edge where it faces its Tile's edge and no Road, its Footpath side (#362), as runs of points a metre apart. */
+  footpath?: Pt[][]
+}
+
+/** A Tile's half of a Footpath (#362), as the stretch of its edge that no Road crosses, which its pavement reaches. */
+export interface FootpathEdge {
+  tile: string
+  from: Pt
+  to: Pt
+}
+
+/** A Block's pavement, as the triangles of its top: flat at the kerb's height, facing up. */
+export interface Pavement {
+  tile: string
+  block: number
+  top: Pt[][]
+}
+
+/** What belongs to a kerb, as a point on the map: a corner of the kerbstone line, a drain grate, a bollard (#362). */
+export interface KerbMark {
+  what: 'kerbstone' | 'grate' | 'bollard'
+  tile: string
+  block: number
+  at: Pt
 }
 
 /**
@@ -213,6 +237,9 @@ export interface Report {
   vehicles: Vehicle[]
   /** The doors a Walker could go in at (#291). */
   doors: Door[]
+  footpathEdges: FootpathEdge[]
+  pavements: Pavement[]
+  kerbs: KerbMark[]
   /** Whether the Block-zoom props' material hides itself with the whole City in frame (zoom 1, under City zoom's). */
   blockZoomHidden: boolean
   /** The static scenery's triangles and meshes (one draw call each, before the shadow pass). */

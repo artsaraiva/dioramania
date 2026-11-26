@@ -24,6 +24,13 @@ Where #270 and this spec disagree, #270 wins. It supersedes these parts, which s
 Everything else holds: the rule, the palette's colours, proportion, the slab, the rest of Roads and Blocks, Block fill and each Zone's file, the Finish, the budget and verification.
 A look change keeps each Zone's building designs and its palette.
 
+## Amended by [#362](https://github.com/artsaraiva/dioramania/issues/362) (2026-11-26)
+
+Where two Tiles meet and no Road crosses, the 4 m of bare road plate between their Blocks is a Footpath ([ADR 0012](../../docs/adr/0012-each-tile-paves-its-half-of-a-footpath.md)): each Tile's pavement runs out to its edge on every side no Road crosses, whether or not a neighbour is there, so two neighbours' halves meet level and an open edge of the City is pavement to the brim of the plate.
+The 2 m is added round each Block, which keeps its outline, so every building, lot, lamp, Drive and Walker stands where it did; a Tile's half is drawn from that Tile alone, and comes and goes with its Blocks.
+A Block's Footpath side takes nothing of a kerb: no kerbstone line, no drain grate, no bollards; along a Road the kerbstone line runs on past the Footpath's mouth to the Tile's edge (The Kerbside round every Tile, below).
+What a Zone shows toward a Footpath is its own ticket's ([#363](https://github.com/artsaraiva/dioramania/issues/363)), and whether the lamps want thinning or the pavement a paving of its own is for the eye ([#364](https://github.com/artsaraiva/dioramania/issues/364)).
+
 ## Amended by [#327](https://github.com/artsaraiva/dioramania/issues/327) (2026-11-21)
 
 Every Block of a zoned Tile has a Drive (`src/render/drive.ts`), the one place on its kerb where a vehicle turns off the Road; an unzoned Tile has none, nor does a Roundabout's island.
@@ -72,7 +79,7 @@ Surface pattern gains a house's storey (siding, and a window between shutters in
 ## Amended by [#193](https://github.com/artsaraiva/dioramania/issues/193) (2026-11-18)
 
 What the scene check of [#191](https://github.com/artsaraiva/dioramania/issues/191) found in the finished Zones is fixed, and four things they build changed.
-Shops: a scene lot too narrow for a stand longer than a car holds a food stall's court instead, a Block whose fronts all face the seam takes its scene on a seam lot, a scene's front keeps the pot plant on the door's outer side only, and shoppers turn at a greengrocer's or a florist's stand rather than walking through its Stage 3 crates.
+Shops: a scene lot too narrow for a stand longer than a car holds a food stall's court instead, a Block whose fronts all face a Footpath takes its scene on a lot facing one, a scene's front keeps the pot plant on the door's outer side only, and shoppers turn at a greengrocer's or a florist's stand rather than walking through its Stage 3 crates.
 Offices: a Block with no room for any scene takes a sculpture plaza on ground down to 6 by 4.5 m.
 Medium density: a courtyard Block with no room for a scene takes a wayside shrine on a shallow band by its edge, 5.6 by 3.4 m, its torii just before the shrine (a long Block whose buildings leave nothing else room takes a second shrine), no hedge lines an O's or a U's court nor any outside stair stands in one, and a bathhouse's chimney stands against its back wall.
 The Kerbside, on every Tile: where the kerb curves, or a Zone's low paving reaches it, a pair of bollards breaks a bare run, and a run passes a crossing's tactile pads rather than stopping at them.
@@ -308,7 +315,7 @@ Default view looks from the south-east at about 41° tilt with the whole slab in
   A Level's Blocks are cut within its own pieces and keep clear of their outline, so a seam between two Levels' pieces is road plate and no later Reveal changes an earlier Level's Blocks.
   A Level's new Roads stay on its own pieces.
   (Settled with the user after the first Reveal playtest, 2026-11-14.)
-  In the sandbox each Tile is a piece of its own, and the seam between two Tiles stops being road plate: it becomes a Footpath, which each Tile paves half of ([ADR 0012](../../docs/adr/0012-each-tile-paves-its-half-of-a-footpath.md), grilled on [#275](https://github.com/artsaraiva/dioramania/issues/275), built by [#362](https://github.com/artsaraiva/dioramania/issues/362)). No Tile's Blocks change for it.
+  In the sandbox each Tile is a piece of its own, and where two Tiles meet and no Road crosses is not road plate but a Footpath, which each Tile paves half of ([ADR 0012](../../docs/adr/0012-each-tile-paves-its-half-of-a-footpath.md), grilled on [#275](https://github.com/artsaraiva/dioramania/issues/275), built by [#362](https://github.com/artsaraiva/dioramania/issues/362)). No Tile's Blocks change for it.
 - Roads run to the slab edge and stop. Cars grow in at a Gateway and shrink out at one. No tunnels, ramps or bridges off the slab.
 
 ## Roads and Blocks
@@ -322,7 +329,7 @@ Default view looks from the south-east at about 41° tilt with the whole slab in
   The real renderer needs a spatial grid over lane segments, and only computes the newly Revealed pieces.
 - First version edges: the pavement is the rim of the Block, and a roundabout island is a raised slab with a tree.
   Bike bands, medians and splitter islands are cut.
-  A Block under 12 m wide, such as the strip a seam leaves beside a Road, has no room for lots and carries a bike lane instead.
+  A Block under 12 m wide, such as one a Tile's edge leaves beside a Road, has no room for lots and carries a bike lane instead.
   The `bikeBand`, `sidewalk` and `median` Road attributes stay unread.
 - **Paint:** a dashed centre line per Road, lane dividers where a direction has more than one lane, and zebra stripes at Junction mouths (decoration until pedestrians become a mechanic).
 - **Priority** is shown in the world as road paint (give-way triangles on a yielding Arm) and is re-read from the sim on every Change.
@@ -369,14 +376,14 @@ Default view looks from the south-east at about 41° tilt with the whole slab in
   Street trees line the avenues the seed picks, whatever the Zone, and what a Zone builds keeps clear of them: buildings, ponds, crop rows and allotment plots alike.
 - **Utility poles** ([#148](https://github.com/artsaraiva/dioramania/issues/148), `src/render/poles.ts`) line one side of every Road: the south side of a Road running east–west and the east side of one running north–south, so a line meets the next Tile's on the same side.
   They are 9 m tall, 0.45 m in from the kerb, with a crossbar across the road carrying two wires that sag about 6 cm for each metre of span, and a transformer drum on every other pole.
-  - They stand six to a cell's width, half a spacing (8.3 m) in from each edge, whatever the Tiles around, so the spacing runs on unbroken across a seam and a seam's wire always finds its poles.
+  - They stand six to a cell's width, half a spacing (8.3 m) in from each edge, whatever the Tiles around, so the spacing runs on unbroken from Tile to Tile and the wire between two Tiles always finds its poles.
     On an avenue they stand between the street trees instead.
   - A line carries on across its Junction where its Road runs straight on, though not across a Roundabout, whose island and Ring stay clear.
-    On a Curve both lines take the outside of the bend and turn the corner on a corner pole standing on the kerb of the bend; where that puts a line on the other side from the next Tile's, the wire across the seam crosses the Road.
+    On a Curve both lines take the outside of the bend and turn the corner on a corner pole standing on the kerb of the bend; where that puts a line on the other side from the next Tile's, the wire between the two crosses the Road.
     A T-junction's stem joins the line across it on a corner pole, where one can stand.
   - Poles move up to 3 m along the Road to keep clear of a lamp, or are left out.
     Standing just in from the kerb, with their crossbars set toward the road, poles and wires clear what every Zone builds, which keeps at least 0.6 m back from the kerb, and the Zones' fill is unchanged.
-  - A wire across a seam belongs to neither Tile: all of them are strung again whenever a Tile lands or an Undo takes one off.
+  - A wire between two Tiles belongs to neither: all of them are strung again whenever a Tile lands or an Undo takes one off.
 - **Fallen petals** lie round every sakura, as many to the square metre whatever its size, out to seven times its size, on the Block only and, on a raised lawn, well in from its edge.
   They are drawn from where the tree stands, so no Block's fill changes.
   From one sakura in two, chosen by where it stands, petals drift down from its crown through the working day ([#225](https://github.com/artsaraiva/dioramania/issues/225)), a plume riding the tree's brick, so no build gains a mesh for them.
@@ -405,6 +412,11 @@ Default view looks from the south-east at about 41° tilt with the whole slab in
     drain grates on the kerb line of the straight runs, one every 9 m;
     and wherever 10 m of pavement runs bare of the Zone's lots, lamps, trees and the corners' furniture, a planter, a pair of bollards or a bench, in turn;
     then, wherever the kerb faces a Road and still runs bare as the scene check reads it, a pair of bollards at the run's free point nearest its middle ([#195](https://github.com/artsaraiva/dioramania/issues/195)). Bare here means nothing standing on the ground within 3.6 m and no bay at the kerb, for more than 11 of the check's points.
+  - On a Block's Footpath side, where it faces its Tile's edge and no Road ([#362](https://github.com/artsaraiva/dioramania/issues/362)): the Block's own pavement, run out 2 m to the Tile's edge and upright there, with no bevel, so that the next Tile's half meets it level; no paving of its own.
+    Nothing of a kerb stands there: no kerbstone line, no drain grate, no bollards.
+    Its lamps, benches and planters stand where they stood; where the walk would lay a pair of bollards it lays a planter or a bench, as where it stands draws;
+    and a run of it still bare as the scene check reads it, walked apart from the kerb, takes a planter or a bench at its free point nearest its middle.
+    Along a Road the kerbstone line runs on past the Footpath's mouth, straight to the Tile's edge and square to it, where the next Tile's carries on; where a Road reaches an open edge of the City, the pavement either side of it runs to the brim.
   - On the road plate, along the middle of each Road lane and 12 m clear of its ends, where the zebras and give-way paint lie: a manhole or a patch of newer tarmac every 26 m or so, within 6% of the plate's lightness.
     Each Tile lays only the marks wholly on its own cell, so that a Road between two Tiles is marked along both halves alike and none spills onto the next Tile.
     No new paint.
@@ -476,7 +488,7 @@ Default view looks from the south-east at about 41° tilt with the whole slab in
 ## Reveal animation
 
 On a Reveal the Level's pieces assemble brick by brick next to the slab already there: slab layers, road plate, Blocks, buildings (drop with a squash), trees and lamps (pop in), with dust where large pieces land.
-A Tile's utility poles pop in once the Blocks near them have landed, and each span of wire grows out from its middle just after; the wires across its seams appear once it has landed.
+A Tile's utility poles pop in once the Blocks near them have landed, and each span of wire grows out from its middle just after; the wires to its neighbours appear once it has landed.
 Its moving details pop in just after its fields or its sheds, and a chimney smokes once it has landed.
 Flagpoles pop in like trees.
 A Rezoning leaves the poles standing.
@@ -545,7 +557,8 @@ no colour nears the reserved two;
 triangles and meshes stay under each Zone's ceiling;
 and a lot is the same lot at every Stage.
 Since [#198](https://github.com/artsaraiva/dioramania/issues/198) it reads each building's walls and roofs from their faces (`scripts/visual/scene/faces.ts`): no stretch of wall over 4 m wide and a storey tall without surface pattern, an opening or something within 0.8 m before it (rule 1), and no roof of 10 m² or more in sight without surface pattern or something standing inside its edge short of a storey, so a parapet or a ridge alone leaves a roof blank (rule 2), at every Stage.
-`--seeds` sweeps the Blocks' fill, and `--against` prints each Zone's building forms and scenes and whether its meshes match the ref.
+Since [#362](https://github.com/artsaraiva/dioramania/issues/362) it holds a Block's Footpath side too: the pavement reaches the Tile's edge on every side no Road crosses, no kerbstone, drain grate or bollard stands within 3.5 m of that edge (but by a Road's kerb, which runs on to it), and no 12 m of a Footpath side, walked apart from the kerb, stands empty (rule 3).
+`--seeds` sweeps the Blocks' fill, and `--against` prints each Zone's building forms and scenes, whether its meshes match the ref, and whether every building, lot, lamp, Drive, bench and planter stands where the ref has it (a Footpath side may add benches and planters).
 Whether walls and roofs look finished, all four sides (4), Stage 1 (8) and a Stage read at City zoom (9) still need the sheet, which is for the look alone.
 What main breaks is listed with its owner in `scripts/visual/scene/known.ts`.
 

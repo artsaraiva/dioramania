@@ -89,7 +89,7 @@ Part of the [visual-style spec](../spec.md), which keeps this Zone's one-line de
     the scenes' and the courts' trees and lawns under the lamps at the Blocks' corners.
   - Departures and gaps, which the user accepted with the sheets on 2026-11-18: a scene takes its ground after the lots are laid rather than before (the scenes, above).
     At Stage 1 up to two stretches of plain paving 12 m and more long stay bare round apartment blocks, beside ground where outside stairs and a rack stand from Stage 2 (rule 3).
-    A scene on a terraced Block faces a Road only where a span of lots facing one is wide enough; on a Block with none it takes lots facing the seam (none on the 26-Tile City).
+    A scene on a terraced Block faces a Road only where a span of lots facing one is wide enough; on a Block with none it takes lots facing a Footpath (none on the 26-Tile City).
     The walkways' lamps are about a pixel at City zoom: their rows read on the walkway faces that look toward the camera, as pale dots over the dimmed windows, and not on the faces that look away.
   - Required by the rules rather than the menu: the apartment blocks' front doors (rule 8, a door at Stage 1; Stage 1 had none), and the hips, the gables to the front and the mansards (rule 10, no two neighbours the same building in another colour); the car parks, pocket courts and trees in beds on bare paving (rule 3).
     Beyond the menu of #178, each kept by the user with the sheets on 2026-11-18: the gardens behind the alleys, with their sheds and washing poles;

@@ -13,8 +13,29 @@ interface Known {
   why: string
 }
 
-/** None today: #195 broke the last bare pavement runs and #216 paved the last blank roofs. */
-const KNOWN: Known[] = []
+/**
+ * #195 broke the last bare runs of kerb and #216 paved the last blank roofs. #362 walks a Block's Footpath side too, where
+ * two Zones' ground claimed up to within a metre of it leaves no room for a planter or a bench (the Kerbside keeps 1.1 m
+ * off a claim, #218): what each Zone shows toward a Footpath is #363's.
+ */
+const KNOWN: Known[] = [
+  {
+    rule: 'empty-pavement',
+    zone: 'industrial',
+    what: /on a Footpath side/,
+    most: 15,
+    owner: '#363',
+    why: 'a yard or a Stage 3 piece claimed by a Footpath side leaves up to 15 m of it bare at Stages 1 and 2',
+  },
+  {
+    rule: 'empty-pavement',
+    zone: 'medium-density',
+    what: /on a Footpath side/,
+    most: 15,
+    owner: '#363',
+    why: 'a court or a piece claimed by a Footpath side leaves up to 15 m of it bare at Stages 1 and 2',
+  },
+]
 
 /** The known failure that accounts for `f`, if any. */
 export const knownOf = (f: Failure) =>

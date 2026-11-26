@@ -33,7 +33,7 @@ Part of the [visual-style spec](../spec.md), which keeps this Zone's one-line de
   Shown in the sheets of `npm run shots -- shops --times noon,night --run 20`, which the user approved on 2026-11-17:
   - Each shop's front colour is never its neighbour's, nor is its form: a flat roof, a false front raised over the street carrying its signboard, or upper storeys set back 1.6 m behind a balcony (a stair house on the roof of one of a single storey).
     One shop in eight is a noodle shop whose vent steams from Stage 2.
-  - Its front, on a Road or on the seam with the next Tile alike: a glass door 1.5 m wide at the end away from the vending machines, lit at night, in a frame under a noren of three panels with a crest;
+  - Its front, on a Road or on a Footpath alike: a glass door 1.5 m wide at the end away from the vending machines, lit at night, in a frame under a noren of three panels with a crest;
     a shop window over the rest of the front, framed, silled and mullioned, with goods on its sill, Block-zoom;
     a signboard over the striped awning with two to four marks for lettering;
     on a Road, a tall sign standing out from the wall at the window's end (on some from Stage 2, on all at Stage 3) and a billboard on two posts behind the roof's front edge (likewise).

@@ -228,7 +228,7 @@ Parking
 
 Footpaths
 
-Grilled on [#275](https://github.com/artsaraiva/dioramania/issues/275) (2026-11-23). The decision, and what was turned down, is [ADR 0012](../../docs/adr/0012-each-tile-paves-its-half-of-a-footpath.md). None of it was in the prototype, and none is built yet.
+Grilled on [#275](https://github.com/artsaraiva/dioramania/issues/275) (2026-11-23). The decision, and what was turned down, is [ADR 0012](../../docs/adr/0012-each-tile-paves-its-half-of-a-footpath.md). None of it was in the prototype. [#362](https://github.com/artsaraiva/dioramania/issues/362) built the Footpaths themselves, what stands on a Block's Footpath side and the scene check's three facts; each Zone's side, the look over them, green Tiles' own surface and walking between Tiles are still to build.
 
 - Each Tile's Blocks stop 2 m short of its edge, so two neighbouring Tiles leave 4 m of bare road plate between their Blocks, kerbed and lamp-lit on both sides. That strip becomes a **Footpath**: pavement level with the Blocks on both sides, with no kerb.
 - Each Tile paves its own 2 m, whether or not a neighbour is there, and no Tile reads its neighbour. Two halves meet when a neighbour lands, and an open edge of the City is pavement to the brim of the plate. A half falls in with its Tile's Blocks during the Assembly, goes and comes back with them through a Swap and an Undo, and stands through a Rezoning.

@@ -15,8 +15,8 @@ import type { Network } from '../../../src/sim/network'
 import { cellAt, cellBounds } from '../../../src/sim/tiles'
 import { Walkers } from '../../../src/walkers/walkers'
 import { facesOf } from './faces'
-import { area, boxOf, hull, turnedBox } from './geometry'
-import type { Block, Claim, Door, Hull, Lot, Mover, Pt, Report, Roof, Scene, Thing, Wall } from './report'
+import { area, boxOf, hull, middle, toSegment, turnedBox } from './geometry'
+import type { Block, Claim, Door, FootpathEdge, Hull, KerbMark, Lot, Mover, Pavement, Pt, Report, Roof, Scene, Thing, Wall } from './report'
 
 // A canvas that paints nothing, for the textures the materials draw (contact shadows, the surface pattern's layers).
 const pen = new Proxy(
@@ -231,6 +231,8 @@ export function buildReport(ask: Ask): Report {
   const roofs: Roof[] = []
   const pools: Report['pools'] = []
   const doors: Door[] = []
+  const pavements: Pavement[] = []
+  const kerbs: KerbMark[] = []
   const moving: Record<string, number> = {}
   const painted = new Map<number, number>() // triangles by linear colour, 12 bits a channel
 
@@ -341,6 +343,14 @@ export function buildReport(ask: Ask): Report {
         pools: 0,
       }
       things.push(thing)
+      // What the rules of the Footpath read (#362): a Block's pavement's top, and what belongs to its kerb.
+      if (block >= 0) {
+        const mark = (what: KerbMark['what'], p: Pt) => kerbs.push({ what, tile: thing.tile, block, at: p })
+        if (thing.what === 'pavement') pavements.push({ tile: thing.tile, block, top: parts[i].flatMap(({ geo }) => topOf(geo)) })
+        else if (thing.what === 'kerbLine') for (const p of all) mark('kerbstone', p)
+        else if (thing.what === 'grate') mark('grate', at)
+        else if (thing.what === 'bollards') for (const f of feet) mark('bollard', middle(f))
+      }
       if (thing.scene >= 0) {
         scenes[thing.scene].things.push(thing.id)
         scenes[thing.scene].tile ||= thing.tile
@@ -414,7 +424,12 @@ export function buildReport(ask: Ask): Report {
     })
     for (const d of doors) d.reached = reached.has(`${d.at.x},${d.at.y}`)
   }
-  for (const b of blocks) b.kerb = kerbOf(b.loop, game.sim.net)
+  const nearLane = byLane(game.sim.net)
+  for (const b of blocks) {
+    const tile = cellBounds(cellAt(middle(b.loop)))
+    b.kerb = runsOf(b.loop, nearLane)
+    b.footpath = runsOf(b.loop, (p) => !nearLane(p) && toSide(tile, p) <= FOOTPATH_SIDE)
+  }
   const colours: Record<string, number> = {}
   const colour = new THREE.Color()
   for (const [key, n] of painted) {
@@ -441,6 +456,9 @@ export function buildReport(ask: Ask): Report {
     colours,
     vehicles: hooked ? vehicles(game.sim.net) : [],
     doors,
+    footpathEdges: footpathEdgesOf(game),
+    pavements,
+    kerbs,
     blockZoomHidden,
     triangles: meshes.reduce((n, m) => n + (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3, 0),
     meshes: meshes.length,
@@ -451,9 +469,86 @@ export function buildReport(ask: Ask): Report {
 
 /** m from a lane's middle within which a Block's edge faces its Road: half a lane, and a little. */
 const KERBSIDE = 6
+/**
+ * m from its Tile's edge within which a Block's edge lies along it, on its Footpath side (#362): `BY_EDGE` of
+ * `src/render/blocks`.
+ * ponytail: copied, not imported, so that `--against` can build a ref from before #362, whose `src` has no `BY_EDGE`; a
+ * change to it there wants one here. Import it once no ref compared with predates #362.
+ */
+const FOOTPATH_SIDE = 2.65
 
-/** Where a Block's edge faces a Road: runs of points a metre apart along its outline, each within `KERBSIDE` of a lane. */
-function kerbOf(loop: Pt[], net: Network): Pt[][] {
+/** m from `p` to the nearest side of the box `b`. */
+const toSide = (b: { x0: number; y0: number; x1: number; y1: number }, p: Pt) => Math.min(p.x - b.x0, b.x1 - p.x, p.y - b.y0, b.y1 - p.y)
+
+/** The triangles of a geometry that lie flat at the kerb's height and face up, on the map: a pavement's top. */
+function topOf(geo: THREE.BufferGeometry): Pt[][] {
+  const pos = geo.attributes.position
+  const index = geo.index
+  const at = (k: number) => (index ? index.getX(k) : k)
+  const out: Pt[][] = []
+  for (let t = 0; t + 2 < (index ? index.count : pos.count); t += 3) {
+    const corners = [at(t), at(t + 1), at(t + 2)]
+    if (corners.some((k) => Math.abs(pos.getY(k) - KERB) > 0.004)) continue
+    const [a, b, c] = corners.map((k) => ({ x: pos.getX(k), z: pos.getZ(k) }))
+    if ((b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z) <= 0) continue // facing down, or no area
+    out.push(corners.map((k) => ({ x: pos.getX(k), y: -pos.getZ(k) })))
+  }
+  return out
+}
+
+/**
+ * Each stretch of each Tile's edge that no Road crosses (#362), read a quarter metre at a time: where no Road's lane
+ * comes within half its width.
+ */
+function footpathEdgesOf(game: Game): FootpathEdge[] {
+  const { net, spec } = game.sim
+  const lanes: [Pt, Pt, number][] = []
+  for (const lane of net.lanes) {
+    if (!('road' in lane.owner)) continue
+    const half = (spec.roads[lane.owner.road]?.laneWidth ?? spec.roadDefaults.laneWidth) / 2
+    for (let i = 0; i + 1 < lane.line.pts.length; i++) lanes.push([lane.line.pts[i], lane.line.pts[i + 1], half])
+  }
+  const road = (p: Pt) => lanes.some(([a, b, half]) => toSegment(a, b, p.x, p.y) < half + 1e-3)
+  const out: FootpathEdge[] = []
+  for (const t of game.city.tiles) {
+    const { x0, y0, x1, y1 } = cellBounds(t.cell)
+    const tile = `${t.cell.x},${t.cell.y}`
+    for (const [a, b] of [
+      [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+      ],
+      [
+        { x: x1, y: y0 },
+        { x: x1, y: y1 },
+      ],
+      [
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+      ],
+      [
+        { x: x0, y: y1 },
+        { x: x0, y: y0 },
+      ],
+    ]) {
+      const n = Math.round(Math.hypot(b.x - a.x, b.y - a.y) / 0.25)
+      let from: Pt | null = null
+      for (let k = 0; k <= n; k++) {
+        const p = { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n }
+        if (!road(p)) from ??= p
+        else if (from) {
+          out.push({ tile, from, to: { x: a.x + ((b.x - a.x) * (k - 1)) / n, y: a.y + ((b.y - a.y) * (k - 1)) / n } })
+          from = null
+        }
+      }
+      if (from) out.push({ tile, from, to: b })
+    }
+  }
+  return out
+}
+
+/** Whether a point lies within `KERBSIDE` of a lane of `net`: where a Block's edge faces a Road. */
+function byLane(net: Network): (p: Pt) => boolean {
   // The lanes' segments, by the 10 m squares they come near.
   const grid = new Map<string, [Pt, Pt][]>()
   const cell = (x: number, y: number) => `${Math.floor(x / 10)},${Math.floor(y / 10)}`
@@ -464,19 +559,21 @@ function kerbOf(loop: Pt[], net: Network): Pt[][] {
         for (let y = Math.floor((Math.min(a.y, b.y) - KERBSIDE) / 10); y <= Math.floor((Math.max(a.y, b.y) + KERBSIDE) / 10); y++)
           (grid.get(`${x},${y}`) ?? grid.set(`${x},${y}`, []).get(`${x},${y}`)!).push([a, b])
     }
-  const near = (p: Pt) =>
-    (grid.get(cell(p.x, p.y)) ?? []).some(([a, b]) => {
-      const [dx, dy] = [b.x - a.x, b.y - a.y]
-      const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)))
-      return Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y) < KERBSIDE
-    })
+  return (p: Pt) => (grid.get(cell(p.x, p.y)) ?? []).some(([a, b]) => toSegment(a, b, p.x, p.y) < KERBSIDE)
+}
+
+/**
+ * The runs of points a metre apart along an outline that pass `near`: where a Block's edge faces a Road, its kerb, or
+ * its Tile's edge, its Footpath side.
+ */
+function runsOf(loop: Pt[], near: (p: Pt) => boolean): Pt[][] {
   const pts: Pt[] = []
   loop.forEach((a, i) => {
     const b = loop[(i + 1) % loop.length]
     const n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y)))
     for (let k = 0; k < n; k++) pts.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n })
   })
-  // Runs of road-facing points, the last joined to the first where the run goes round the start of the loop.
+  // Runs of points that pass, the last joined to the first where the run goes round the start of the loop.
   const runs: Pt[][] = []
   let run: Pt[] = []
   for (const p of pts) {
