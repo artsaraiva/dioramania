@@ -385,7 +385,7 @@ export function createWalkers(seed: number, zoneOf: (cell: Cell) => Zone | undef
      * Walkers on the pavement of the pieces of slab `pieces`, laid in `field`, their ways to `places`, round
      * `obstacles` (see `Walkers.add`), and the zebras of `net` they cross by. Nobody can reach a roundabout's island.
      * ponytail: the ways cost up to 18 ms a Tile (about 10 ms on average, M4 Pro), as does `refit`'s at a Stage-up, a
-     * dropped frame; work them out over frames if it shows.
+     * dropped frame, and the Tile's Footpaths 2 to 5 ms more (#294); work them out over frames if it shows.
      */
     add(net: Network, field: Field, pieces: Bounds[], places: readonly Place[] = [], obstacles: readonly Vec[][] = []) {
       const islands = net.junctions.filter((j) => j.type === 'roundabout').map((j) => j.at)

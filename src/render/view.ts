@@ -590,6 +590,7 @@ export function createView(
         done() {
           if (!ours()) return
           assembly.built = true
+          // Only now do its pavements join its neighbours': a Walker steps onto a Tile once it has landed (#294).
           walkers.add(planned.net, field, build.pieces, build.places, build.obstacles)
           sky.fit(slab)
           restring()
