@@ -3,6 +3,7 @@ import { mulberry32 } from '../../sim/demand'
 import { type Bounds, middle, polyline, type Vec } from '../../sim/geometry'
 import { KERB } from '../blocks'
 import { KEI } from '../cars'
+import { plainGate } from '../drive'
 import { inside } from '../field'
 import { LOW_POLY } from '../look'
 import {
@@ -41,6 +42,7 @@ import { PATTERN } from '../pattern'
 import { bench, gardenShed, SETTS, SHRINE, shrine, waiting } from '../props'
 import { type Footprint } from '../kerbside'
 import {
+  apart,
   besideRow,
   corners,
   distance,
@@ -428,8 +430,8 @@ function bins(g: ZoneGround, draw: () => number) {
  * The delivery scooter of a medium-density Block (#178), from Stage 2: to the first of `doors` (a point on the pavement
  * before a front, its front's facing, and the side it turns round to if it must: 1 its right, -1 its left), in an order
  * drawn from `draw`, whose way in and out lies on the Block across a
- * pavement facing a Road, clear of the utility poles, the lamps, the street trees and the ground claimed, though it
- * crosses bays and door steps. It waits off down the
+ * pavement facing a Road, clear of the utility poles, the lamps, the street trees, the ground claimed and the Drive's
+ * gate (#327), though it crosses bays, door steps and the Drive's crossover. It waits off down the
  * Road, unseen; comes in over the kerb, growing as it leaves the Road as a car does at a Gateway; pulls up at the door
  * and waits; turns round on the pavement and goes back out over the kerb, shrinking away as it rejoins the Road. Returns
  * its way, or none if no door has room.
@@ -443,6 +445,7 @@ function deliveryScooter(g: ZoneGround, draw: () => number, doors: (Vec & { ry: 
   const waits = [away[0] + draw() * (away[1] - away[0]), wait[0] + draw() * (wait[1] - wait[0])]
   const shift = Math.floor(draw() * Math.max(1, doors.length))
   const side0 = draw() < 0.5 ? 1 : -1
+  const gate = g.drive ? plainGate(g.drive) : []
   for (let n = 0; n < doors.length; n++) {
     const door = doors[(n + shift) % doors.length]
     const k = kerbAhead(g, { ...door, w: 0, d: 0, onRoad: true }, 0)
@@ -462,7 +465,8 @@ function deliveryScooter(g: ZoneGround, draw: () => number, doors: (Vec & { ry: 
         [-s * 4.2, k - 0.12],
       ].map(([u, v]) => turned(door.x, door.y, door.ry, u, v))
       if (!clearOfKerbside(g, way, [1.2, 1.4, 1.8])) continue
-      // Every half metre of it on the Block and clear of what stands there, but where it meets the kerb.
+      // Every half metre of it on the Block and clear of what stands there, but where it meets the kerb; and its 1.1 m
+      // width off the Drive's gate.
       const loop = polyline(way)
       let free = true
       for (let i = 1; i < way.length && free; i++) {
@@ -471,7 +475,10 @@ function deliveryScooter(g: ZoneGround, draw: () => number, doors: (Vec & { ry: 
         for (let j = 0; j <= steps && free; j++) {
           const p = { x: a.x + ((b.x - a.x) * j) / steps, y: a.y + ((b.y - a.y) * j) / steps }
           const atKerb = (i === 1 && j === 0) || (i === way.length - 1 && j === steps)
-          free = (atKerb || field.sample(p.x, p.y) > 0.05) && kit.unclaimed(p.x, p.y, 0, 0, 0, 0.35, ['stand'])
+          free =
+            (atKerb || field.sample(p.x, p.y) > 0.05) &&
+            kit.unclaimed(p.x, p.y, 0, 0, 0, 0.35, ['stand']) &&
+            gate.every((q) => apart(q, p.x, p.y) >= 0.55)
         }
       }
       if (!free) continue
