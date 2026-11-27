@@ -99,14 +99,16 @@ export function within(loop: Pt[], x: number, y: number): boolean {
   return inside
 }
 
+/** m from `(x, y)` to the nearest point of the segment from `a` to `b`. */
+export function toSegment(a: Pt, b: Pt, x: number, y: number): number {
+  const [dx, dy] = [b.x - a.x, b.y - a.y]
+  const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)))
+  return Math.hypot(a.x + t * dx - x, a.y + t * dy - y)
+}
+
 /** m from `(x, y)` to the nearest point of a closed outline. */
 export function toEdge(loop: Pt[], x: number, y: number): number {
   let best = Infinity
-  for (let i = 0; i < loop.length; i++) {
-    const [a, b] = [loop[i], loop[(i + 1) % loop.length]]
-    const [dx, dy] = [b.x - a.x, b.y - a.y]
-    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)))
-    best = Math.min(best, Math.hypot(a.x + t * dx - x, a.y + t * dy - y))
-  }
+  for (let i = 0; i < loop.length; i++) best = Math.min(best, toSegment(loop[i], loop[(i + 1) % loop.length], x, y))
   return best
 }

@@ -184,14 +184,14 @@ function tileModel(layout: Layout, rotation: number, tint: string | null) {
 
   for (const [top, h, color] of LAYERS) box(CELL + 2 * RIM, h, CELL + 2 * RIM, 0, top, 0, color)
   box(CELL, 0.6, CELL, 0, 0, 0, PLATE)
-  const side = (CELL - ROAD_WIDTH) / 2
-  const off = (CELL + ROAD_WIDTH) / 4
-  // Pavement wherever no Road runs: the four corners, and the middle of each side without a Road.
-  for (const [sx, sy] of [[1, 1], [-1, 1], [-1, -1], [1, -1]]) box(side - 3, 0.5, side - 3, sx * off, 0.5, sy * off, PAVEMENT) // prettier-ignore
+  // Pavement wherever no Road runs, kept 1.5 m off the Roads and out to the Tile's edge, its half of a Footpath (#362),
+  // as the placed Tile's is: the four corners, and the middle of each side without a Road.
+  const [near, far] = [ROAD_WIDTH / 2 + 1.5, CELL / 2]
+  const [side, off] = [far - near, (near + far) / 2]
+  for (const [sx, sy] of [[1, 1], [-1, 1], [-1, -1], [1, -1]]) box(side, 0.5, side, sx * off, 0.5, sy * off, PAVEMENT) // prettier-ignore
   for (const d of DIRECTIONS) {
     const [dx, dy] = [Math.round(Math.cos((d * Math.PI) / 2)), Math.round(Math.sin((d * Math.PI) / 2))]
-    if (!hasRoad({ layout, rotation }, d))
-      box(dx ? side - 3 : ROAD_WIDTH + 3, 0.5, dy ? side - 3 : ROAD_WIDTH + 3, dx * off, 0.5, dy * off, PAVEMENT)
+    if (!hasRoad({ layout, rotation }, d)) box(dx ? side : 2 * near, 0.5, dy ? side : 2 * near, dx * off, 0.5, dy * off, PAVEMENT)
     // A dashed centre line out to the edge.
     else for (let t = 20; t < CELL / 2 - 2; t += 9) box(dx ? 5 : 0.7, 0.1, dy ? 5 : 0.7, dx * t, 0.1, dy * t, '#ffffff')
   }

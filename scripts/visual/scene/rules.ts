@@ -1,6 +1,6 @@
 // The rules of Finish (#173) that can be asserted over a scene report (#191): each a function from a report to what
 // failed, with where and by how much. Rules that need judgement are approximations, and say what they leave out.
-import { boxesMeet, disc, middle, overlap, toEdge, within } from './geometry'
+import { boxesMeet, boxOf, disc, middle, overlap, toEdge, within } from './geometry'
 import type { Box, Claim, Failure, Hull, Lot, Pt, Report, Thing, Wall } from './report'
 
 /** m two outlines may overlap before it counts: what a rounded corner or a bevel can account for. */
@@ -14,6 +14,12 @@ const SECOND_SCENE = 2500
  * far of the kerb a bay lies at it, as a taxi bay 0.75 m in does.
  */
 const EMPTY = { run: 12, band: 4, step: 1, bay: 1.5 }
+/**
+ * A Footpath's half (#362): m between the points a Tile's edge is walked at, from its ends too, and how near each the
+ * pavement's top must come; how deep in from the edge a Block's Footpath side lies, and how far in from a stretch's ends,
+ * where a Road's kerb runs on to the edge, what belongs to the kerb may stand.
+ */
+const FOOTPATH = { step: 1, reach: 0.3, deep: 3.5, ends: 1.5 }
 /** The reserved colours (the visual-style spec's Palette): nothing within `hue`° of either goes over `chroma` of its chroma. */
 const RESERVED = { tool: '#1f7aff', jam: '#ff4a1f', hue: 30, chroma: 0.65 }
 /** m above the ground a vehicle's lowest point may stand: it stands on its wheels. */
@@ -358,8 +364,9 @@ const budget =
   }
 
 /**
- * No 12 m of pavement stands empty (rule 3): walking each Block's kerb where it faces a Road a metre at a time, something
- * standing (any layer, a wall too) within `EMPTY.band` m of the kerb, or a utility pole or lamp beside it. A taxi or a
+ * No 12 m of pavement stands empty (rule 3): walking each Block's kerb where it faces a Road a metre at a time, and apart
+ * from it its Footpath side, where it faces its Tile's edge (#362), something standing (any layer, a wall too) within
+ * `EMPTY.band` m of the edge, or a utility pole or lamp beside it. A taxi or a
  * parking bay laid at the kerb is no pavement, a lay-by off the Road, and breaks the run (#193), as a Drive does (#327). Approximation: only
  * what stands counts, so paving or a planted bed alone leaves the pavement empty, as a bare run of joints is.
  */
@@ -372,26 +379,103 @@ export const emptyPavement: Rule = (r) => {
     const bays = r.claims
       .filter((c) => c.block === i && (c.kind === 'bay' || c.kind === 'taxi' || c.kind === 'drive'))
       .map((c) => ({ feet: [c.hull], box: boxOfHull(c.hull) }))
-    const runs = b.kerb ?? [along([...b.loop, b.loop[0]], EMPTY.step)]
-    let [longest, at]: [number, Pt | null] = [0, null]
-    for (const pts of runs) {
-      let run = 0
-      for (const p of pts) {
-        const probe = {
-          feet: [disc(p.x, p.y, EMPTY.band)],
-          box: { x0: p.x - EMPTY.band, y0: p.y - EMPTY.band, x1: p.x + EMPTY.band, y1: p.y + EMPTY.band },
+    /** The longest run of points of `runs` with nothing standing by, and the point it reaches. */
+    const emptiest = (runs: Pt[][]): [number, Pt | null] => {
+      let [longest, at]: [number, Pt | null] = [0, null]
+      for (const pts of runs) {
+        let run = 0
+        for (const p of pts) {
+          const probe = {
+            feet: [disc(p.x, p.y, EMPTY.band)],
+            box: { x0: p.x - EMPTY.band, y0: p.y - EMPTY.band, x1: p.x + EMPTY.band, y1: p.y + EMPTY.band },
+          }
+          const lay = {
+            feet: [disc(p.x, p.y, EMPTY.bay)],
+            box: { x0: p.x - EMPTY.bay, y0: p.y - EMPTY.bay, x1: p.x + EMPTY.bay, y1: p.y + EMPTY.bay },
+          }
+          run = near.some((t) => depth(probe, t) > 0) || bays.some((c) => depth(lay, c) > 0) ? 0 : run + 1
+          if (run > longest) [longest, at] = [run, p]
         }
-        const lay = {
-          feet: [disc(p.x, p.y, EMPTY.bay)],
-          box: { x0: p.x - EMPTY.bay, y0: p.y - EMPTY.bay, x1: p.x + EMPTY.bay, y1: p.y + EMPTY.bay },
-        }
-        run = near.some((t) => depth(probe, t) > 0) || bays.some((c) => depth(lay, c) > 0) ? 0 : run + 1
-        if (run > longest) [longest, at] = [run, p]
       }
+      return [longest, at]
     }
-    if (at && longest * EMPTY.step >= EMPTY.run)
-      out.push(fail('empty-pavement', r, { tile: b.tile, block: i }, `pavement empty toward ${pt(at)}`, `${longest * EMPTY.step} m`))
+    for (const [runs, side] of [
+      [b.kerb ?? [along([...b.loop, b.loop[0]], EMPTY.step)], ''],
+      [b.footpath ?? [], ' on a Footpath side'],
+    ] as const) {
+      const [longest, at] = emptiest(runs)
+      if (at && longest * EMPTY.step >= EMPTY.run)
+        out.push(
+          fail('empty-pavement', r, { tile: b.tile, block: i }, `pavement empty${side} toward ${pt(at)}`, `${longest * EMPTY.step} m`),
+        )
+    }
   })
+  return out
+}
+
+/** The points a stretch of a Tile's edge is walked at: `FOOTPATH.step` apart, the first and last half a step in from its ends. */
+function walkEdge({ from, to }: { from: Pt; to: Pt }): Pt[] {
+  const n = Math.max(1, Math.round(Math.hypot(to.x - from.x, to.y - from.y) / FOOTPATH.step))
+  return Array.from({ length: n }, (_, k) => ({
+    x: from.x + ((to.x - from.x) * (k + 0.5)) / n,
+    y: from.y + ((to.y - from.y) * (k + 0.5)) / n,
+  }))
+}
+
+/**
+ * The pavement reaches the Tile's edge on every side no Road crosses (#362): walking each stretch of the edge a metre at
+ * a time, the top of one of the Tile's pavements comes within `FOOTPATH.reach` of each point.
+ */
+export const footpathEdge: Rule = (r) => {
+  const out: Failure[] = []
+  const tops = r.pavements.flatMap((p) => p.top.map((t) => ({ tile: p.tile, t, box: boxOf(t) })))
+  for (const f of r.footpathEdges) {
+    const mine = tops.filter((t) => t.tile === f.tile)
+    const paved = (p: Pt) =>
+      mine.some(
+        ({ t, box }) =>
+          boxesMeet(box, { x0: p.x, y0: p.y, x1: p.x, y1: p.y }, FOOTPATH.reach) &&
+          (within(t, p.x, p.y) || toEdge(t, p.x, p.y) <= FOOTPATH.reach),
+      )
+    let [run, longest, at] = [0, 0, null as Pt | null]
+    for (const p of walkEdge(f)) {
+      run = paved(p) ? 0 : run + 1
+      if (run > longest) [longest, at] = [run, p]
+    }
+    if (at)
+      out.push(
+        fail(
+          'footpath-edge',
+          r,
+          { tile: f.tile },
+          `pavement stops short of the Tile’s edge toward ${pt(at)}`,
+          `${longest * FOOTPATH.step} m`,
+        ),
+      )
+  }
+  return out
+}
+
+/**
+ * No kerbstone, drain grate or bollard stands on a Footpath side (#362): none within `FOOTPATH.deep` of a stretch of its
+ * Tile's edge that no Road crosses, but by the stretch's ends, where a Road's kerb runs on to the edge. The first of each
+ * on a Block fails.
+ */
+export const footpathKerb: Rule = (r) => {
+  const out: Failure[] = []
+  const seen = new Set<string>()
+  for (const k of r.kerbs) {
+    for (const f of r.footpathEdges) {
+      if (f.tile !== k.tile || seen.has(`${k.block}:${k.what}`)) continue
+      const len = Math.hypot(f.to.x - f.from.x, f.to.y - f.from.y)
+      const [ux, uy] = [(f.to.x - f.from.x) / len, (f.to.y - f.from.y) / len]
+      const [dx, dy] = [k.at.x - f.from.x, k.at.y - f.from.y]
+      const [along, deep] = [dx * ux + dy * uy, Math.abs(dy * ux - dx * uy)]
+      if (along < FOOTPATH.ends || along > len - FOOTPATH.ends || deep > FOOTPATH.deep) continue
+      seen.add(`${k.block}:${k.what}`)
+      out.push(fail('footpath-kerb', r, { tile: k.tile, block: k.block }, `${k.what} on a Footpath side at ${pt(k.at)}`, `${m(deep)} in`))
+    }
+  }
   return out
 }
 
@@ -563,6 +647,8 @@ export function rules(ceilings: Record<string, { triangles: number; meshes: numb
     scenes,
     moves,
     'empty-pavement': emptyPavement,
+    'footpath-edge': footpathEdge,
+    'footpath-kerb': footpathKerb,
     pools,
     'block-zoom': blockZoomProps,
     drives,
