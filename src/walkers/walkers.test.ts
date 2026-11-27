@@ -354,3 +354,120 @@ it('a Walker whose pavement reaches no Place or Signal still has Storylets, alon
     for (const w of walkers.all) expect(w.log.some((entry) => entry.ended)).toBe(true)
   }
 })
+
+// Walking between Tiles
+
+/**
+ * The pavement round `tile`'s one Block as a Tile lays it, 3.6 m in from its edges: those of two Tiles side by side lie
+ * 7.2 m apart, either side of their Footpath.
+ */
+const footpathSide = (tile: Bounds) => pavement(tile, 3.6)
+
+it('a Walker bound for a Place on the next Tile reaches it and comes back to their own door', () => {
+  // Homes on the west Tile, and shops on the east one.
+  const [homes, shops] = [doorsOn(WEST), doorsOn(EAST)]
+  const walkers = new Walkers(7)
+  walkers.add(WEST, [footpathSide(WEST)], homes, [], [], 'home')
+  walkers.add(EAST, [footpathSide(EAST)], shops, [], [], 'shop')
+  const residents = on(walkers, WEST).filter((w) => w.own && !w.lead)
+  // The Places each was at, in turn, where each who walks alone was a step ago, and the Place each last set out for.
+  const visits = new Map(residents.map((w) => [w, [] as Place[]]))
+  const was = new Map(residents.filter((w) => !w.side).map((w) => [w, whereIs(w)]))
+  const bound = new Map<Walker, Place>()
+  for (let t = 0; t < 1800; t += 0.1) {
+    walkers.step(0.1)
+    for (const w of residents) {
+      if (w.bound?.way) bound.set(w, w.bound.way.place)
+      const at = w.doing === 'act' ? w.way!.place : undefined
+      // The shop they go in at is the one they set out for.
+      if (at && shops.includes(at)) expect(at).toBe(bound.get(w))
+      if (at && visits.get(w)!.at(-1) !== at) visits.get(w)!.push(at)
+      // They walk the whole way there and back: never further in a step than a stride.
+      const [before, now] = [was.get(w), whereIs(w)]
+      if (!before) continue
+      expect(Math.hypot(now.x - before.x, now.y - before.y)).toBeLessThan(0.3)
+      was.set(w, now)
+    }
+  }
+  // Whoever went in at a shop went in at their own door next.
+  const after = [...visits].flatMap(([w, places]) =>
+    places.flatMap((at, i) => (shops.includes(at) && places[i + 1] ? [places[i + 1] === w.own!.door] : [])),
+  )
+  expect(after.length).toBeGreaterThan(3)
+  expect(after).not.toContain(false)
+})
+
+it('a Walker on a neighbour’s Tile when it is swapped or taken off is on their own pavement afterwards', () => {
+  /** Whether `p` is on the pavement of `tile`'s Block, or beside it as one of a two walks. */
+  const onPavement = (p: { x: number; y: number }, tile: Bounds) =>
+    Math.abs(Math.max(Math.abs(p.x - (tile.x0 + tile.x1) / 2), Math.abs(p.y - (tile.y0 + tile.y1) / 2)) - 46.4) < 0.45
+  let caught = 0
+  // The east Tile taken off at one moment after another: whoever of the west Tile is out is caught wherever they are.
+  for (let at = 60; at <= 1200; at += 60) {
+    const walkers = new Walkers(7)
+    walkers.add(WEST, [footpathSide(WEST)], doorsOn(WEST), [], [], 'home')
+    walkers.add(EAST, [footpathSide(EAST)], doorsOn(EAST), [], [], 'shop')
+    for (let t = 0; t < at; t += 0.1) walkers.step(0.1)
+    // Out: over the Footpath, east of their own pavement.
+    const before = new Map(on(walkers, WEST).map((w) => [w, whereIs(w)]))
+    const out = on(walkers, WEST).filter((w) => before.get(w)!.x > 46.85)
+    caught += out.length
+    walkers.takeOff([EAST])
+    expect(on(walkers, WEST).length).toBe(before.size)
+    for (const w of out) expect(onPavement(whereIs(w), WEST)).toBe(true)
+    // Everyone else is where they were.
+    for (const [w, was] of before) if (!out.includes(w)) expect(whereIs(w)).toEqual(was)
+    // A Swap lays the Tile again, and an Undo does not: either way they walk on, and nobody is left out on nothing.
+    if (at % 120) walkers.add(EAST, [pavement(EAST, 25)])
+    for (let t = 0; t < 300; t += 0.1) {
+      walkers.step(0.1)
+      for (const w of on(walkers, WEST)) expect(whereIs(w).x).toBeLessThan(46.85)
+    }
+  }
+  expect(caught).toBeGreaterThan(5)
+})
+
+it('a Walker crosses at the Signal of a Tile that is not theirs, and only in the Walk phase', () => {
+  // The Road of the crossing above runs on across the east Tile, where the zebra of the Junction E crosses it at
+  // x = 100, and a Footpath joins the Blocks south of it. The shops are north of it, on the east Tile.
+  const [EAST_SOUTH, EAST_NORTH] = [box(53.6, -46.4, 146.4, -15.6), box(53.6, 15.6, 146.4, 46.4)]
+  const zebra = {
+    junction: 'E',
+    ends: [
+      { x: 100, y: -15.6 },
+      { x: 100, y: 15.6 },
+    ],
+  } as const
+  const shops: Place[] = [70, 100, 130].map((x) => ({ kind: 'door', x, y: 19, ry: Math.PI }))
+  /**
+   * Thirty minutes of the Walkers of the west Tile's south Block, the lights of E as `crossing`'s are of X: whether any
+   * was in the east Tile's Road while it was not the Walk phase, how many were seen waiting at its kerb, and how many
+   * went in at a shop.
+   */
+  const visiting = (walkLeft: (t: number) => number | undefined) => {
+    const walkers = new Walkers(7)
+    walkers.add(WEST, [box(-46.4, -46.4, 46.4, -15.6)])
+    walkers.add(EAST, [EAST_SOUTH, EAST_NORTH], shops, [], [zebra])
+    const seen = { outOfPhase: false, waited: new Set<Walker>(), shopped: new Set<Walker>() }
+    for (let t = 0; t < 1800; t += 0.1) {
+      walkers.step(0.1, (junction) => (junction === 'E' ? walkLeft(t + 0.1) : undefined))
+      for (const w of on(walkers, WEST)) {
+        if (Math.abs(whereIs(w).y) < 14 && !walkLeft(t + 0.1)) seen.outOfPhase = true
+        if (w.doing === 'wait') seen.waited.add(w)
+        if (w.doing === 'act' && shops.includes(w.way!.place)) seen.shopped.add(w)
+      }
+    }
+    return seen
+  }
+  // A cycle of a minute whose first 30 s are the Walk phase: they cross to the shops, and nobody is caught in the Road.
+  const cycle = visiting((t) => Math.max(0, 30 - (t % 60)))
+  expect(cycle.shopped.size).toBeGreaterThan(2)
+  expect(cycle.outOfPhase).toBe(false)
+  // A Walk phase never long enough to cross in: they wait, and nobody reaches a shop.
+  const short = visiting(() => 12)
+  expect(short.waited.size).toBeGreaterThan(2)
+  expect(short.shopped.size).toBe(0)
+  // No Signal at E: nobody waits for one, or reaches a shop.
+  const none = visiting(() => undefined)
+  expect(none.waited.size + none.shopped.size).toBe(0)
+})

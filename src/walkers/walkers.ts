@@ -10,7 +10,8 @@ export type Kind = 'shopper' | 'schoolchild' | 'worker'
  * What a Walker is doing (#288): strolling their pavement (or along it to where they leave it for a Place), stopped on
  * it, going off it to a Place, at the Place (indoors, sat on a bench, or indoors on the way up to a terrace), up on the
  * terrace and indoors on the way down from it (#293), or coming back to where they left it. Or (#296) waiting at the
- * kerb for the Walk phase, or crossing the Road in it.
+ * kerb for the Walk phase, or crossing the Road in it; or (#294) stepping over a Footpath to the next Tile's pavement,
+ * crossing it too.
  */
 type Doing = 'stroll' | 'stop' | 'go' | 'act' | 'up' | 'down' | 'back' | 'wait' | 'cross'
 
@@ -40,6 +41,37 @@ interface ZebraEnd {
   readonly to: Polyline
 }
 
+/**
+ * A Footpath as the Walkers of the pavement on one side of it know it (#294): the pavement of the next Tile, on its
+ * other side, and the spots they may step over at, each `s` m round theirs and, straight across, `at` m round that one.
+ */
+interface Footpath {
+  readonly to: Polyline
+  readonly spots: readonly { readonly s: number; readonly at: number }[]
+}
+
+/** Something that stands at a Walker's height: its outline on the map, and the box round it. */
+interface Standing {
+  readonly hull: readonly Vec[]
+  readonly box: Bounds
+}
+
+/**
+ * A Block's pavement, as the Walkers know it: its Tile, the Block's outline and the pavement's centre line, the ways
+ * to its Places, the zebras' ends on it, the Footpaths along it, and the Walkers whose own it is; and `rim`, the
+ * outlines of what stands at a Walker's height by its Tile's edges, where its Footpaths are.
+ */
+interface Pavement {
+  readonly tile: Bounds
+  readonly loop: Vec[]
+  readonly line: Polyline
+  ways: Way[]
+  rim: readonly Standing[]
+  readonly zebras: ZebraEnd[]
+  footpaths: Footpath[]
+  readonly walkers: Walker[]
+}
+
 /** A spot on a pavement: its centre line, and m round it. */
 interface Round {
   readonly line: Polyline
@@ -49,10 +81,11 @@ interface Round {
 /**
  * A crossing a Walker makes (#296), from the moment they choose it till they are across: the Junction whose Walk
  * phase they cross in; where on their pavement they leave it; their way from there up to their spot at the kerb,
- * `kerb` m along it, and on over the Road; and where on the far pavement it comes to.
+ * `kerb` m along it, and on over the Road; and where on the far pavement it comes to. Or their step over a Footpath
+ * (#294), which has no Junction and nothing to wait for: straight over from their pavement to the next Tile's.
  */
 interface Crossing {
-  readonly junction: string
+  readonly junction?: string
   readonly s: number
   readonly path: Polyline
   readonly kerb: number
@@ -81,7 +114,7 @@ export type Place = {
  * The way from a pavement to a Place, round whatever stands between: from `pts[0]`, `s` m round the pavement, to the
  * Place's step or seat, `pts[2]`. `two`: whether two side by side fit on it too.
  */
-export interface Way {
+interface Way {
   readonly place: Place
   readonly s: number
   readonly pts: readonly Vec[]
@@ -106,9 +139,14 @@ export interface Walker {
   readonly home: string
   /** What they do. */
   readonly job: string
-  /** The Tile whose pavement they walk, by its bounds. */
+  /** Their own Tile, by its bounds: the one their own pavement is on. */
   readonly tile: Bounds
-  /** The centre line of the pavement they lap: their Block's, or the one across the Road they last crossed to. */
+  /** The centre line of their own pavement, their Block's: where they start, and where they come home to (#294). */
+  readonly pavement: Polyline
+  /**
+   * The centre line of the pavement they lap: their own, or the one they last reached, across a Road or over a
+   * Footpath on another Tile.
+   */
   line: Polyline
   /** m to the left of `line`, and of their way to a Place, they walk: 0 alone, and either side of it in a two. */
   readonly side: number
@@ -130,8 +168,13 @@ export interface Walker {
   /** What they walk of `way`, while off `line`, and `along` it m: or, crossing, of `crossing`'s way. */
   path?: Polyline
   along: number
-  /** The crossing they make, from the moment they choose it till they are across. */
+  /** The crossing they make, or the step over a Footpath, from the moment they choose it till they are across. */
   crossing?: Crossing
+  /**
+   * Where they are bound beyond the pavement they walk (#294): the pavement `to`, and the `way` from it to the Place
+   * there they go out to; or with no way, home, to their own pavement. In a two, the lead's.
+   */
+  bound?: { readonly to: Polyline; readonly way?: Way }
   /** s till they next choose what to do, stop being stopped, or leave the Place. */
   time: number
   /** Where their own stream of chances has got to: what they do is drawn from it. */
@@ -192,6 +235,15 @@ const ROOM = 0.6 // m between two Walkers who wait, a step apart
 // About five wait at once on a busy Crossroads. Queue them back along the pavement if a crowd shows it.
 const SPARE = 1.5 // m more than their way across that the Walk phase left must carry a Walker for them to start across
 const PATIENCE = 150 // s a Walker waits at the kerb before they give up and stroll on
+// m at most from a pavement straight over a Footpath to the next Tile's: the Footpath's 4 m and both pavements' centre
+// lines' 1.6 m in from their Blocks' edges, 7.2 m, and a little for a Block's corner.
+// ponytail: a Footpath is found by this distance alone, so a Footpath made wider, or pavements laid further in, by more
+// than 0.8 m between them would join no Tiles, and nobody would go out. Have the view say where the Footpaths are
+// (`FOOTPATH` in `src/render/blocks`, `INSET` in `src/render/walkers`) if either changes.
+const ACROSS = 8
+const RIM = 6 // m in from a Tile's edge that what stands there may stand in the way of a step over a Footpath
+const FAR = 3 // Footpaths and crossings at most from the pavement they walk to a Place on another Tile a Walker goes out to
+const OUT = 0.06 // of the times a Walker with Places on other Tiles that near chooses what to do, they go out to one
 const FOLLOWED = 5 // s a Walker is Followed before a Storylet begins for them
 const REST = 30 // s at least, and up to 40 s more, from the end of a Walker's Storylet till the next may begin
 const BEAT = 2 // s at least, and up to 3 s more, from one beat of a Storylet done till the next is set out on
@@ -275,7 +327,8 @@ function walker(seed: number, tile: Bounds, line: Polyline, side = 0, lead?: Wal
   const s = draw() * line.length
   const speed = (0.9 + draw() * 0.6) * (draw() < 0.5 ? 1 : -1) * (kind === 'schoolchild' ? 0.85 : 1)
   const [luck, time] = [Math.floor(draw() * 4294967296), 2 + draw() * 18]
-  const who = { seed, name, kind, traits, home, job, tile, line, side, s, speed, doing: 'stroll' as const, along: 0, time, luck }
+  // prettier-ignore
+  const who = { seed, name, kind, traits, home, job, tile, pavement: line, line, side, s, speed, doing: 'stroll' as const, along: 0, time, luck }
   const life = { kept: false, followedFor: 0, rest: 0, log: lead?.log ?? [] }
   return lead ? { ...who, ...life, lead, s: lead.s, speed: lead.speed, time: lead.time } : { ...who, ...life }
 }
@@ -320,6 +373,8 @@ const rests = (w: Walker) => Object.assign(w, { storylet: undefined, followedFor
 const stairs = (w: Walker) => 4 + roll(w) * 3
 
 const wrap = (s: number, length: number) => ((s % length) + length) % length
+/** m along their pavement from where `w` is to `s` m round it, the shorter way. */
+const gapTo = (w: Walker, s: number) => Math.min(wrap(s - w.s, w.line.length), wrap(w.s - s, w.line.length))
 /** `p` moved `side` m to the left of `heading`. */
 const beside = (p: Vec, heading: number, side: number) => ({ x: p.x - Math.sin(heading) * side, y: p.y + Math.cos(heading) * side })
 const cross = (o: Vec, a: Vec, b: Vec) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
@@ -365,6 +420,42 @@ function nearest(line: Polyline, p: Vec) {
     best = { s: line.cum[i - 1] + seg * t, d }
   }
   return best
+}
+
+/** Those of `obstacles` that stand within `RIM` m of an edge of `tile`. */
+function rimOf(tile: Bounds, obstacles: readonly (readonly Vec[])[]): Standing[] {
+  return obstacles
+    .map((hull) => ({ hull, box: around([...hull]) }))
+    .filter(({ box }) => box.x0 < tile.x0 + RIM || box.x1 > tile.x1 - RIM || box.y0 < tile.y0 + RIM || box.y1 > tile.y1 - RIM)
+}
+
+/**
+ * The Footpath between the pavements `from` and `to` of two Tiles, as the Walkers of `from` know it: a spot every metre
+ * of `from` that lies within a step over a Footpath of `to`, straight over from which one alone, and two side by side,
+ * keep clear of all that stands on either side of it: its lamps, benches and planters. None, if the two lie on no
+ * Footpath's two sides.
+ */
+function footpathBetween(from: Pavement, to: Pavement): Footpath | undefined {
+  const box = around(to.line.pts)
+  const rim = [...from.rim, ...to.rim]
+  const wide = PAIR + BODY
+  const spots: { s: number; at: number }[] = []
+  for (let s = 0; s < from.line.length; s++) {
+    const a = pointAt(from.line, s)
+    if (a.x < box.x0 - ACROSS || a.x > box.x1 + ACROSS || a.y < box.y0 - ACROSS || a.y > box.y1 + ACROSS) continue
+    const { s: at, d } = nearest(to.line, a)
+    if (d > ACROSS) continue
+    const b = pointAt(to.line, at)
+    const step = around([a, b])
+    const near = rim.filter((o) => overlaps(o.box, { x0: step.x0 - wide, y0: step.y0 - wide, x1: step.x1 + wide, y1: step.y1 + wide }))
+    const heading = Math.atan2(b.y - a.y, b.x - a.x)
+    const clear = [0, -PAIR, PAIR].every((side) => {
+      const [p, q] = [beside(a, heading, side), beside(b, heading, side)]
+      return near.every((o) => apart(p, q, o.hull) >= BODY)
+    })
+    if (clear) spots.push({ s, at })
+  }
+  return spots.length ? { to: to.line, spots } : undefined
 }
 
 /**
@@ -488,15 +579,22 @@ function endsOf(lines: readonly Polyline[], zebras: readonly Zebra[]) {
 
 /**
  * The City's Walkers, each drawn once from the City's seed and the pavement they walk, so that the same City has the
- * same Walkers every time, and a placement, a Swap or an Undo of one Tile changes nobody on the others. Each walks the
- * centre line of one Block's pavement, and leaves it only for a Place on its Block, to go in at a door and come out,
- * sit on a bench, or go in at a door, up onto its building's terrace a while (#293) and back down and out; or to cross
- * the Road at a Signal of their own Tile (#296): they wait at the kerb, facing across, for a Walk phase with time
- * enough left to reach the far kerb, and from there walk the pavement they reached, and go to its Places. Where the
+ * same Walkers every time, and a placement, a Swap or an Undo of one Tile leaves those of the others who they were.
+ * Each walks the centre line of a Block's pavement, their own to begin with, and leaves it for a Place on its Block, to
+ * go in at a door and come out, sit on a bench, or go in at a door, up onto its building's terrace a while (#293) and
+ * back down and out; or to cross the Road at a Signal (#296): they wait at the kerb, facing across, for a Walk phase with
+ * time enough left to reach the far kerb, and from there walk the pavement they reached, and go to its Places. Where the
  * doors of a Tile are homes, shops or plants, most of its Walkers have a home of their own, about a third a shop they
  * keep and most a plant they work at (#291): they go in and out of that door, and stay longer than a visitor would. What
  * each does, and when, is drawn from their own seed too. A third walk in twos, and a two does all of it together.
  * Nothing in the Sim reads them, and nothing here draws them: `src/render/walkers` does.
+ *
+ * The pavements of two Tiles side by side join over the Footpath between them (#294), once both are added: a Walker
+ * steps over it anywhere along it that is clear of what stands beside it, where they are if they walk beside it, or
+ * else at its nearest end, straight on along the Road. Now and then one goes out to a Place on another Tile, up to three Footpaths and crossings away, crossing at
+ * any Signal on the way, and then comes home: back to their own pavement, and in at their own door, if they have one.
+ * One with no way home left (a Signal taken away, a Tile between undone) stays on the pavement they reached, as one
+ * who crossed a Road does. Nobody sets out on a Storylet while they are out, or goes out in the middle of one.
  *
  * A Storylet (#290) begins for a Walker Followed for five seconds, or Kept, once 30 to 70 s have passed since their
  * last: one of `storylets` that fits who they are, whether they walk in a two, the time of day, the door of their own
@@ -507,11 +605,7 @@ function endsOf(lines: readonly Polyline[], zebras: readonly Zebra[]) {
  */
 export class Walkers {
   private walkers: Walker[] = []
-  /**
-   * Each pavement's ways to its Places and the zebras' ends on it, by the pavement's centre line, and the Walkers whose
-   * Block's it is.
-   */
-  private pavements: { tile: Bounds; loop: Vec[]; line: Polyline; ways: Way[]; zebras: ZebraEnd[]; walkers: Walker[] }[] = []
+  private pavements: Pavement[] = []
   /** The Walker the player Follows (#289), if any: a Swap or an Undo that takes them off lets go of them. */
   followed: Walker | null = null
   private lately: Ended[] = []
@@ -588,24 +682,32 @@ export class Walkers {
    * if it is anyone's own (#291), theirs or another's.
    */
   doingNow(w: Walker): string {
-    const door = w.way?.place.kind === 'door' ? w.way.place : undefined
+    // The Place they are bound for: on the pavement they walk, or on another Tile's (#294).
+    const place = (w.way ?? w.bound?.way)?.place
+    const door = place?.kind === 'door' ? place : undefined
     const host = door && (w.own?.door === door ? w : this.walkers.find((o) => o.own?.door === door))
     const says = host && (host === w ? OWN[host.own!.kind] : OWN[host.own!.kind].visit(host.name))
-    if (says && w.doing === 'stroll' && !w.crossing) return says.heading
-    if (says && w.doing === 'act') return says.inside
-    const place = w.way?.place
+    // Over a Footpath they are on their way still, as on the pavement.
+    const atSignal = w.crossing?.junction !== undefined
+    const doing = w.doing === 'cross' && !atSignal ? 'stroll' : w.doing
+    if (says && doing === 'stroll' && !atSignal) return says.heading
+    if (says && doing === 'act') return says.inside
     const bench = place?.kind === 'bench'
-    switch (w.doing) {
+    switch (doing) {
       case 'stroll':
-        return w.crossing
+        return atSignal
           ? 'heading for the crossing'
-          : !place
-            ? 'out for a stroll'
-            : bench
+          : place
+            ? bench
               ? 'heading for a bench'
               : place.kind === 'door'
                 ? 'on an errand'
                 : 'heading for a terrace'
+            : !w.bound
+              ? 'out for a stroll'
+              : w.own
+                ? OWN[w.own.kind].heading
+                : 'on the way back'
       case 'stop':
         return w.side ? 'stopped for a chat' : 'looking in a window'
       case 'go':
@@ -640,11 +742,14 @@ export class Walkers {
   ) {
     const lines = pavements.map((loop) => polyline([...loop, loop[0]]))
     const ends = endsOf(lines, zebras)
+    const rim = rimOf(tile, obstacles)
     for (const [i, loop] of pavements.entries()) {
       const seeds = mulberry32(pavementSeed(this.seed, loop))
       const line = lines[i]
-      const pavement = { tile, loop, line, ways: waysOf(line, loop, places, obstacles), zebras: ends.get(line)!, walkers: [] as Walker[] }
+      const ways = waysOf(line, loop, places, obstacles)
+      const pavement: Pavement = { tile, loop, line, ways, rim, zebras: ends.get(line)!, footpaths: [], walkers: [] }
       this.pavements.push(pavement)
+      this.join(pavement)
       for (let k = Math.max(2, Math.round(line.length / SPACING)); k > 0; k--) {
         const two = seeds() < TWOS
         const lead = walker((seeds() * 4294967296) >>> 0, tile, line, two ? -PAIR : 0)
@@ -659,17 +764,29 @@ export class Walkers {
   /**
    * The Places of the Tile `tile` as it now stands, `places`, and `obstacles`, the outlines on the map of all that
    * stands at a Walker's height on it, after a Stage-up or a Rezoning, and what a door on it is to a Walker who has one
-   * of their own, `own` (see {@link add}): each has their door again from those there are now. Its Walkers bound for a
-   * Place go back to their pavement and choose again.
+   * of their own, `own` (see {@link add}): each has their door again from those there are now. Whoever is bound for a
+   * Place from its pavements, a Walker of another Tile too (#294), goes back to the pavement and chooses again. Its
+   * Footpaths are found again, round what now stands beside them.
    */
   refit(tile: Bounds, places: readonly Place[], obstacles: readonly (readonly Vec[])[], own?: Own) {
+    const lines = new Set<Polyline>()
+    const rim = rimOf(tile, obstacles)
     for (const p of this.pavements) {
       if (!sameBounds(p.tile, tile)) continue
       p.ways = waysOf(p.line, p.loop, places, obstacles)
+      p.rim = rim
+      this.join(p)
       for (const w of p.walkers) drawOwn(w, p.ways, own)
+      lines.add(p.line)
     }
     for (const w of this.walkers) {
-      if (!sameBounds(w.tile, tile) || !w.way) continue
+      // On their way to step over one of its Footpaths, they choose again where.
+      const { crossing } = w
+      const over = crossing && crossing.junction === undefined && w.doing === 'stroll'
+      if (over && (lines.has(w.line) || lines.has(crossing.to.line))) Object.assign(w, { crossing: undefined, time: SOON })
+      if (!lines.has(w.line) || !w.way) continue
+      // Out for a Place here and yet to reach it, they set out again for the one of its kind there now.
+      if (w.bound && (w.doing === 'stroll' || w.doing === 'go')) Object.assign(w, { bound: { to: w.line, way: w.way }, time: SOON })
       if (w.path) w.s = w.way.s
       Object.assign(w, { doing: 'stroll', way: undefined, path: undefined, along: 0 })
       // Their Storylet's beat, to set out on again soon, if the Places it needs are still there.
@@ -679,12 +796,30 @@ export class Walkers {
     }
   }
 
-  /** Take the Walkers off `tiles`, which a Swap or an Undo is lifting. */
+  /**
+   * Take the Walkers off `tiles`, which a Swap or an Undo is lifting, and their pavements with them. A Walker of
+   * another Tile who is on one of those pavements, or on a Footpath to or from it (#294), is straight back on their
+   * own, where it is nearest; and one on their way to step over to it walks on where they are.
+   */
   takeOff(tiles: Bounds[]) {
     const kept = (t: Bounds) => !tiles.some((tile) => sameBounds(tile, t))
+    const gone = new Set(this.pavements.filter((p) => !kept(p.tile)).map((p) => p.line))
     this.walkers = this.walkers.filter((w) => kept(w.tile))
     this.pavements = this.pavements.filter((p) => kept(p.tile))
+    for (const p of this.pavements) p.footpaths = p.footpaths.filter((f) => !gone.has(f.to))
     if (this.followed && !this.walkers.includes(this.followed)) this.followed = null
+    for (const w of this.walkers) {
+      if (w.lead) continue
+      const over = w.crossing && gone.has(w.crossing.to.line)
+      if (!gone.has(w.line) && !over) continue
+      const caught = w.doing === 'cross' || gone.has(w.line)
+      const at = caught ? { line: w.pavement, s: nearest(w.pavement, whereIs(w)).s } : w
+      Object.assign(w, { way: undefined, path: undefined, bound: caught ? undefined : w.bound })
+      strollOn(w, at)
+      // The beat of their Storylet they had set out on, they turned back from.
+      this.back(w, false)
+    }
+    for (const w of this.walkers) if (w.lead) follow(w, w.lead)
   }
 
   /**
@@ -703,7 +838,8 @@ export class Walkers {
       }
       if (w === followed) w.followedFor += dt
       w.rest = Math.max(0, w.rest - dt)
-      if (!w.storylet && !w.rest && (w.followedFor >= FOLLOWED || w.kept)) this.begin(w, timeOf(timeOfDay), leftToCross)
+      // Out, or on their way home, a Storylet waits till they are back.
+      if (!w.storylet && !w.rest && !w.bound && (w.followedFor >= FOLLOWED || w.kept)) this.begin(w, timeOf(timeOfDay), leftToCross)
       this.live(w, dt, simDt, leftToCross)
     }
   }
@@ -740,7 +876,7 @@ export class Walkers {
    * pavement.
    */
   private canDo(w: Walker, line: Polyline, steps: readonly Step[], leftToCross: LeftToCross): boolean {
-    const pavement = this.pavements.find((p) => p.line === line)
+    const pavement = this.pavementOf(line)
     for (const [i, step] of steps.entries()) {
       if (step === 'cross')
         return !!pavement?.zebras.some((z) => leftToCross(z.junction) !== undefined && this.canDo(w, z.to, steps.slice(i + 1), leftToCross))
@@ -815,11 +951,9 @@ export class Walkers {
 
   /** The nearest three ways from `w`'s pavement to Places of the kind `kind`: ways a two fit, if they walk in one. */
   private nearest(w: Walker, kind: Place['kind']) {
-    const { length } = w.line
-    const gap = (way: Way) => Math.min(wrap(way.s - w.s, length), wrap(w.s - way.s, length))
-    return (this.pavements.find((p) => p.line === w.line)?.ways ?? [])
+    return (this.pavementOf(w.line)?.ways ?? [])
       .filter((way) => way.place.kind === kind && (way.two || !w.side))
-      .sort((a, b) => gap(a) - gap(b))
+      .sort((a, b) => gapTo(w, a.s) - gapTo(w, b.s))
       .slice(0, 3)
   }
 
@@ -829,7 +963,113 @@ export class Walkers {
    */
   private wayHome(w: Walker, line = w.line) {
     const door = w.own?.door
-    return door && this.pavements.find((p) => p.line === line)?.ways.find((way) => way.place === door && (way.two || !w.side))
+    return door && this.pavementOf(line)?.ways.find((way) => way.place === door && (way.two || !w.side))
+  }
+
+  /**
+   * The way from the pavement `w` walks to the Place they came out for by `way`: or, the Tile built again since in a
+   * Stage-up or a Rezoning, to the Place of its kind that now stands nearest where that one stood, if there is one.
+   */
+  private wayStill(w: Walker, way: Way) {
+    const far = ({ place }: Way) => Math.hypot(place.x - way.place.x, place.y - way.place.y)
+    return (this.pavementOf(w.line)?.ways ?? [])
+      .filter((other) => other.place.kind === way.place.kind && (other.two || !w.side))
+      .reduce<Way | undefined>((a, b) => (a && far(a) <= far(b) ? a : b), undefined)
+  }
+
+  /** Find the Footpaths between `pavement` and the pavements of the Tiles beside its own, from either side, anew. */
+  private join(pavement: Pavement) {
+    pavement.footpaths = []
+    const { x0, y0, x1, y1 } = around(pavement.line.pts)
+    const reach = { x0: x0 - ACROSS, y0: y0 - ACROSS, x1: x1 + ACROSS, y1: y1 + ACROSS }
+    for (const other of this.pavements) {
+      if (sameBounds(other.tile, pavement.tile)) continue
+      other.footpaths = other.footpaths.filter((f) => f.to !== pavement.line)
+      if (!overlaps(reach, around(other.line.pts))) continue
+      const [out, back] = [footpathBetween(pavement, other), footpathBetween(other, pavement)]
+      if (out) pavement.footpaths.push(out)
+      if (back) other.footpaths.push(back)
+    }
+  }
+
+  private pavementOf(line: Polyline) {
+    return this.pavements.find((p) => p.line === line)
+  }
+
+  /**
+   * The pavements `from` reaches by `far` Footpaths and crossings at Signals at most, nearest first, each with the
+   * first pavement on the shortest way to it.
+   * ponytail: worked out again for every Walker each time they set out or step onto a pavement, over every pavement
+   * there is for one bound for home. With all of it, a step of the 454 Walkers of the 26-Tile City takes 0.14 ms (M4
+   * Pro); keep the ways between pavements, laid again as a Tile or a Signal comes or goes, if a larger City shows it.
+   */
+  private routes(from: Polyline, leftToCross: LeftToCross, far = Infinity) {
+    const first = new Map<Polyline, Polyline>()
+    const seen = new Set([from])
+    let edge = [from]
+    for (let hops = 0; hops < far && edge.length; hops++) {
+      const next: Polyline[] = []
+      for (const line of edge) {
+        const pavement = this.pavementOf(line)
+        if (!pavement) continue
+        const crossings = pavement.zebras.filter((z) => leftToCross(z.junction) !== undefined)
+        for (const { to } of [...pavement.footpaths, ...crossings]) {
+          if (seen.has(to)) continue
+          seen.add(to)
+          first.set(to, first.get(line) ?? to)
+          next.push(to)
+        }
+      }
+      edge = next
+    }
+    return first
+  }
+
+  /**
+   * The ways to the Places `w` may go out to (#294), each with its pavement: those of other Tiles than their own
+   * within `FAR` Footpaths and crossings of the pavement they walk, that a two fit if they walk in one; by where the
+   * Places stand, so that the same City gives the same choice however it was built.
+   */
+  private abroad(w: Walker, leftToCross: LeftToCross) {
+    return [...this.routes(w.line, leftToCross, FAR).keys()]
+      .map((to) => this.pavementOf(to)!)
+      .filter((p) => !sameBounds(p.tile, w.tile))
+      .flatMap((p) => p.ways.filter((way) => way.two || !w.side).map((way) => ({ to: p.line, way })))
+      .sort((a, b) => a.way.place.x - b.way.place.x || a.way.place.y - b.way.place.y)
+  }
+
+  /**
+   * Send `w` on toward where they are bound (#294), if anywhere: over the next Footpath or to the next crossing on the
+   * shortest way there, or, on its pavement, to the Place they came out for, and from then on they are bound for home;
+   * or, home again, in at their own door, if they have one. Whoever can no longer get to the Place, or it is gone, turns
+   * for home, and with no way home either they are bound nowhere. False if this sends them nowhere.
+   */
+  private onward(w: Walker, leftToCross: LeftToCross): boolean {
+    const bound = w.bound
+    if (!bound) return false
+    const home = { to: w.pavement }
+    if (w.line === bound.to) {
+      w.bound = bound.way ? home : undefined
+      const way = bound.way ? this.wayStill(w, bound.way) : this.wayHome(w)
+      if (!way) return this.onward(w, leftToCross)
+      w.way = way
+      headFor(w, way.s)
+      return true
+    }
+    const next = this.routes(w.line, leftToCross).get(bound.to)
+    const footpath = next && this.pavementOf(w.line)!.footpaths.find((f) => f.to === next)
+    if (footpath) {
+      // Over it where they are, if they walk beside it, or else at its nearest end.
+      const { s, at } = footpath.spots.reduce((a, b) => (gapTo(w, b.s) < gapTo(w, a.s) ? b : a))
+      const [from, to] = [pointAt(w.line, s), pointAt(next, at)]
+      const path = polyline([from, to].map(({ x, y }) => ({ x, y })))
+      w.crossing = { s, path, kerb: 0, to: { line: next, s: at } }
+      headFor(w, s)
+      return true
+    }
+    if (next && this.crossAt(w, leftToCross, (to) => to === next)) return true
+    w.bound = bound.way ? home : undefined
+    return this.onward(w, leftToCross)
   }
 
   /** `w`'s next `dt` seconds, `simDt` of the Sim's. */
@@ -841,6 +1081,7 @@ export class Walkers {
         const to = w.way?.s ?? w.crossing?.s
         if (to !== undefined && wrap((to - w.s) * Math.sign(w.speed), length) <= pace) {
           if (w.way) Object.assign(w, { s: to, doing: 'go', path: pathOf(w.line, w.way, w.side), along: 0 })
+          else if (w.crossing!.junction === undefined) Object.assign(w, { s: to, doing: 'cross', along: 0 })
           else Object.assign(w, { s: to, doing: 'wait', along: 0, time: PATIENCE })
           break
         }
@@ -853,19 +1094,23 @@ export class Walkers {
         // a brisk pace. The Signal gone, or waited long enough, they give up and stroll on.
         const { junction, path, kerb } = w.crossing!
         w.along = Math.min(kerb, w.along + pace)
-        const left = leftToCross(junction)
+        const left = leftToCross(junction!)
         if (w.along === kerb && left !== undefined && left * WALKING_PACE >= path.length - kerb + SPARE) w.doing = 'cross'
         else if (left === undefined || (w.time -= simDt) <= 0) {
           strollOn(w, w)
           this.back(w, false)
+          // Out for a Place across the Road, they turn for home.
+          if (w.bound?.way) w.bound = { to: w.pavement }
         }
         break
       }
       case 'cross': {
-        const { path, to } = w.crossing!
-        if ((w.along += WALKING_PACE * simDt) < path.length) break
+        // Over a Road at a brisk pace on the Sim's clock, and over a Footpath at their own, as on the pavement.
+        const { junction, path, to } = w.crossing!
+        if ((w.along += junction === undefined ? pace : WALKING_PACE * simDt) < path.length) break
         strollOn(w, to)
         this.back(w)
+        this.onward(w, leftToCross)
         break
       }
       case 'stop':
@@ -902,13 +1147,16 @@ export class Walkers {
   }
 
   /**
-   * What `w` does next, strolling: their Storylet's next beat, if they are in one they can go on with. Or go in at their
+   * What `w` does next, strolling: their Storylet's next beat, if they are in one they can go on with. Or on toward where
+   * they are bound (#294), to a Place on another Tile or home from it. Or go in at their
    * own door (#291), if they have one on the pavement they walk. Or stop, go in at a door, sit on a bench, cross the
    * Road at a Signal, or stroll on. Where their pavement reaches a terrace, half the doors they would go in at are a
-   * terrace's instead (#293), so that elsewhere nothing changes.
+   * terrace's instead (#293), and where Places on other Tiles are near, a fifth are one of those (#294), so that
+   * elsewhere nothing changes.
    */
   private choose(w: Walker, leftToCross: LeftToCross) {
     if (w.storylet && this.beat(w, leftToCross)) return
+    if (this.onward(w, leftToCross)) return
     const home = this.wayHome(w)
     if (home && roll(w) < HOME) {
       w.way = home
@@ -918,6 +1166,12 @@ export class Walkers {
     const r = roll(w)
     if (r >= 0.8) {
       if (r >= 0.95 || !this.crossAt(w, leftToCross)) w.time = strolling(w)
+      return
+    }
+    const out = r >= 0.3 && r < 0.3 + OUT ? this.abroad(w, leftToCross) : []
+    if (out.length) {
+      w.bound = out[Math.floor(roll(w) * out.length)]
+      this.onward(w, leftToCross)
       return
     }
     const goesUp = r >= 0.45 && r < 0.6 && this.nearest(w, 'terrace').length > 0
@@ -938,10 +1192,9 @@ export class Walkers {
    */
   private crossAt(w: Walker, leftToCross: LeftToCross, reaches = (_to: Polyline) => true) {
     const { length } = w.line
-    const gap = (s: number) => Math.min(wrap(s - w.s, length), wrap(w.s - s, length))
-    const zebras = (this.pavements.find((p) => p.line === w.line)?.zebras ?? [])
+    const zebras = (this.pavementOf(w.line)?.zebras ?? [])
       .filter((z) => leftToCross(z.junction) !== undefined && reaches(z.to))
-      .sort((a, b) => gap(a.s) - gap(b.s))
+      .sort((a, b) => gapTo(w, a.s) - gapTo(w, b.s))
       .slice(0, 2)
     if (!zebras.length) return false
     const { junction, s: middle, across, to } = zebras[Math.floor(roll(w) * zebras.length)]
@@ -961,7 +1214,7 @@ export class Walkers {
     }
     // Of the spots, the front row's before the one behind; of a row, those free, a step from anyone else who waits or
     // is on their way to; and with none free, the one with most room.
-    const waiting = this.walkers.filter((o) => o.crossing && !o.lead && o !== w && o.doing !== 'cross')
+    const waiting = this.walkers.filter((o) => o.crossing?.junction !== undefined && !o.lead && o !== w && o.doing !== 'cross')
     const spots = ROWS.flatMap((row) =>
       (stretch.length ? stretch : [middle]).map((s) => {
         const spot = spotAt(s, row)
@@ -993,7 +1246,15 @@ function follow(w: Walker, lead: Walker) {
   w.line = lead.line
   if (w.way !== lead.way || !lead.path) w.path = undefined
   if (lead.path && !w.path) w.path = pathOf(w.line, lead.way!, w.side)
-  Object.assign(w, { s: lead.s, speed: lead.speed, doing: lead.doing, way: lead.way, crossing: lead.crossing, time: lead.time })
+  Object.assign(w, {
+    s: lead.s,
+    speed: lead.speed,
+    doing: lead.doing,
+    way: lead.way,
+    crossing: lead.crossing,
+    bound: lead.bound,
+    time: lead.time,
+  })
   w.along = w.path && lead.path ? (lead.along * w.path.length) / lead.path.length : lead.crossing ? lead.along : 0
 }
 
