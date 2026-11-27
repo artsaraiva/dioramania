@@ -134,7 +134,8 @@ export function fillBlock(kit: Kit, block: Block, { net, spec, scenery, field, z
     if (stands) dressKerbside(kit, block, field, net, spec, { lamps, trees: kerbsideTrees, poles, stands, unpaved })
   }
   if (drive) plainDrive(kit, drive)
-  for (const landmark of scenery.landmarks) if (at(landmark.at)) tower(kit, field, block, ...landmark.at)
+  const onDrive = (q: Vec) => !!drive && nearDrive(drive, q) // what a landmark leaves off, as the lamps and street trees
+  for (const landmark of scenery.landmarks) if (at(landmark.at)) tower(kit, field, block, ...landmark.at, onDrive)
   const authored = scenery.blocks.find((s) => at(s.at))
   if (authored) {
     if (authored.type === 'plaza') return dress([], plaza(kit, field, block))
@@ -155,7 +156,7 @@ export function fillBlock(kit: Kit, block: Block, { net, spec, scenery, field, z
     const point = seededLandmark(scenery.seed, block, scenery.seeded.landmarks)
     const ground = point && site(field, block, 22, 22, point, drive ? driveCorners(drive) : [], 0.3)
     if (ground) {
-      tower(kit, field, block, ground.x, ground.y)
+      tower(kit, field, block, ground.x, ground.y, onDrive)
       reserved.push(towerGround(ground.x, ground.y))
     }
   }

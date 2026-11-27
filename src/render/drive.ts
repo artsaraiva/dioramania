@@ -118,6 +118,21 @@ export function driveCorners({ x, y, ry, w, d }: Drive): Vec[] {
 }
 
 /**
+ * The plain Drive's gate as ground: its two posts, the one on the left with the gate folded open against it. What a
+ * mover's way keeps off, as medium-density's scooter does, which may cross the crossover and pass through the gate.
+ */
+export function plainGate({ x, y, ry, w, d }: Drive): Footprint[] {
+  const left = PLAIN.post + PLAIN.folded
+  return [
+    { u: -w / 2 + left / 2, wide: left },
+    { u: w / 2 - PLAIN.post / 2, wide: PLAIN.post },
+  ].map(({ u, wide }) => {
+    const [px, py] = to(x, y, ry, u, -d / 2 + PLAIN.gate)
+    return { x: px, y: py, ry, w: wide, d: PLAIN.post }
+  })
+}
+
+/**
  * The plain Drive (#327), every Zone's until a later ticket dresses it for its own: claims its ground, which nothing
  * else stands on, and lays the crossover where the kerb is dropped, as one brick, and the open gate, as another.
  */

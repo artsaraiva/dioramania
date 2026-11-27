@@ -176,6 +176,13 @@ export function near(lot: Footprint, x: number, y: number, pad: number): boolean
   return Math.abs(dx * c + dy * s) < lot.w / 2 + pad && Math.abs(-dx * s + dy * c) < lot.d / 2 + pad
 }
 
+/** How far `(x, y)` lies from a row lot, or any footprint: 0 on it. */
+export function apart(lot: Footprint, x: number, y: number): number {
+  const [c, s] = [Math.cos(lot.ry), Math.sin(lot.ry)]
+  const [dx, dy] = [x - lot.x, y - lot.y]
+  return Math.hypot(Math.max(0, Math.abs(dx * c + dy * s) - lot.w / 2), Math.max(0, Math.abs(-dx * s + dy * c) - lot.d / 2))
+}
+
 /**
  * Whether row lots `a` and `b` lie side by side (#193), as `beside` has it for boxes: in `a`'s frame, within 1.5 m of
  * each other one way, as across a bend or a corner of a row, and sharing more than 1 m of side the other.

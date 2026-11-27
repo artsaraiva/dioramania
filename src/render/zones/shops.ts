@@ -284,11 +284,17 @@ function stallCourt(g: ZoneGround, l: RowLot, stage: number, from: number, pavin
   }
 }
 
-/** Pot plants either side of shop `l`'s door, Block-zoom, from Stage 1 (#175); or, if `outer`, on its outer side alone. */
+/**
+ * Pot plants either side of shop `l`'s door, Block-zoom, from Stage 1 (#175); or, if `outer`, on its outer side alone.
+ * One whose ground (`potsGround`'s) lies on the Drive, beside the shop's end, is left off (#327).
+ */
 function doorPots(g: ZoneGround, l: RowLot, door: 1 | -1, outer = false) {
+  const out = (u: number, o: number) => turned(l.x, l.y, l.ry, u, l.d / 2 + o)
   const spots = frontOf(l.w, door)
     .pots.slice(0, outer ? 1 : 2)
-    .map((u) => turned(l.x, l.y, l.ry, u, l.d / 2 + 0.35))
+    .filter((u) => !onDrive(g, { ...out(u, POT.d / 2), w: POT.w, d: POT.d, ry: l.ry }))
+    .map((u) => out(u, 0.35))
+  if (!spots.length) return
   g.kit.from(
     1,
     () =>
